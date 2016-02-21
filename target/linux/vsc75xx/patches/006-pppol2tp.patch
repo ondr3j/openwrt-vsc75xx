@@ -1,0 +1,12 @@
+diff -urN linux-2.6.23.9.org/drivers/net/pppol2tp.c linux-2.6.23.9/drivers/net/pppol2tp.c
+--- linux-2.6.23.9.org/drivers/net/pppol2tp.c	2007-11-27 01:51:43.000000000 +0800
++++ linux-2.6.23.9/drivers/net/pppol2tp.c	2009-02-24 10:18:45.000000000 +0800
+@@ -1487,7 +1487,7 @@
+ 	 * d_session is 0. Otherwise look up tunnel using supplied
+ 	 * tunnel id.
+ 	 */
+-	if ((sp->pppol2tp.s_session == 0) && (sp->pppol2tp.d_session == 0)) {
++	if (1 /*(sp->pppol2tp.s_session == 0) && (sp->pppol2tp.d_session == 0)*/) {
+ 		tunnel_sock = pppol2tp_prepare_tunnel_socket(sp->pppol2tp.fd,
+ 							     sp->pppol2tp.s_tunnel,
+ 							     &error);

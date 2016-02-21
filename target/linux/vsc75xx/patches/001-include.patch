@@ -1,0 +1,32 @@
+Only in linux-2.6.23.9-grocx/include/asm-arm: arch-grocx
+diff -ur -x CVS linux-2.6.23.9/include/linux/spi/spi.h linux-2.6.23.9-grocx/include/linux/spi/spi.h
+--- linux-2.6.23.9/include/linux/spi/spi.h	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/include/linux/spi/spi.h	2007-12-04 04:24:54.000000000 +0100
+@@ -402,6 +402,10 @@
+ 	u16		delay_usecs;
+ 	u32		speed_hz;
+ 
++#ifdef CONFIG_ARCH_GROCX
++	unsigned	last_in_message_list;
++#endif
++
+ 	struct list_head transfer_list;
+ };
+ 
+Only in linux-2.6.23.9-grocx/include/linux: star_switch_api.h
+Only in linux-2.6.23.9-grocx/include/linux: vitgenio.h
+diff -ur -x CVS linux-2.6.23.9/include/net/netfilter/nf_conntrack.h linux-2.6.23.9-grocx/include/net/netfilter/nf_conntrack.h
+--- linux-2.6.23.9/include/net/netfilter/nf_conntrack.h	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/include/net/netfilter/nf_conntrack.h	2007-12-26 03:28:31.000000000 +0100
+@@ -132,6 +132,11 @@
+ 
+ 	/* Extensions */
+ 	struct nf_ct_ext *ext;
++#if defined(CONFIG_STAR_SHNAT)
++	u32	star_ready;
++	u32 star_session_hash;
++	u32	star_session_link_hash;	
++#endif
+ };
+ 
+ static inline struct nf_conn *

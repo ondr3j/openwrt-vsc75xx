@@ -1,0 +1,55 @@
+--- linux-2.6.23.17-orig/drivers/usb/serial/usb-serial.c	2011-03-15 16:58:16.924735839 +0800
++++ linux-2.6.23.17/drivers/usb/serial/usb-serial.c	2011-03-15 17:01:10.760735373 +0800
+@@ -58,6 +58,7 @@
+    drivers depend on it.
+ */
+ 
++static int dual3G=0;
+ static ushort maxSize = 0;
+ static int debug;
+ static struct usb_serial *serial_table[SERIAL_TTY_MINORS];	/* initially all NULL */
+@@ -86,7 +87,11 @@
+ 
+ 	*minor = 0;
+ 	mutex_lock(&table_lock);
+-	for (i = 0; i < SERIAL_TTY_MINORS; ++i) {
++	if (dual3G == 1 && serial->dev->portnum == 3) 	// 2130 bottom usb port num = 3
++		i=20;
++	else
++		i=0;
++	for (; i < SERIAL_TTY_MINORS; ++i) {
+ 		if (serial_table[i])
+ 			continue;
+ 
+@@ -1120,6 +1125,15 @@
+ 
+ struct tty_driver *usb_serial_tty_driver;
+ 
++
++// Jimmy : setup dual3G mode for 3G+ 3G/56K backup, will assign interface for usb port 1 from ttyUSB20
++extern void (*set_usbserial_driver_dual3G)(int param); 
++void set_usbserial_driver_dual3G_fun(int param)
++{
++	printk("Usbserial driver : set dual3G mode = %d !!!!!!!!!!\r\n", param);
++	dual3G = param;
++}
++
+ static int __init usb_serial_init(void)
+ {
+ 	int i;
+@@ -1173,6 +1187,8 @@
+ 
+ 	info(DRIVER_DESC);
+ 
++	set_usbserial_driver_dual3G = set_usbserial_driver_dual3G_fun; //Jimmy
++
+ 	return result;
+ 
+ exit_generic:
+@@ -1279,3 +1295,6 @@
+ MODULE_PARM_DESC(debug, "Debug enabled or not");
+ module_param(maxSize, ushort,0);
+ MODULE_PARM_DESC(maxSize,"User specified USB endpoint size");
++module_param(dual3G, int,0);
++MODULE_PARM_DESC(dual3G,"Dual 3G modem mode enabled or not");
++

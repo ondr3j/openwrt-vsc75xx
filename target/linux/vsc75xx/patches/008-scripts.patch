@@ -1,0 +1,14 @@
+diff -urN linux-2.6.23.9-orig/scripts/mkcompile_h linux-2.6.23.9/scripts/mkcompile_h
+--- inux-2.6.23.9-orig/scripts/mkcompile_h	2007-11-27 01:51:43.000000000 +0800
++++ linux-2.6.23.9/scripts/mkcompile_h	2009-03-12 09:24:48.000000000 +0800
+@@ -39,7 +39,9 @@
+ 	TIMESTAMP=$KBUILD_BUILD_TIMESTAMP
+ fi
+ 
+-UTS_VERSION="#$VERSION"
++export LANG=en_US
++SVN_VER=$(svn info ../../.. | grep "Rev:" | tr -d [:blank:][:alpha:]:)
++UTS_VERSION="r$SVN_VER"
+ CONFIG_FLAGS=""
+ if [ -n "$SMP" ] ; then CONFIG_FLAGS="SMP"; fi
+ if [ -n "$PREEMPT" ] ; then CONFIG_FLAGS="$CONFIG_FLAGS PREEMPT"; fi

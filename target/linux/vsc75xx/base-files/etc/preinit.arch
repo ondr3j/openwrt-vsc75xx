@@ -1,0 +1,11 @@
+#!/bin/sh -x
+armio -c "led 0 15 0"
+DEF=`cat /proc/button/default`
+[ "$DEF" = "1" ] && {
+    grep -q "/jffs jffs2" /proc/mounts || {
+        echo "Resetting to factory defaults (default button pressed)" > /dev/console
+        armio -c "led 0 15 124"
+        mtd erase rootfs_data
+        armio -c "led 0 15 0"
+    }
+}

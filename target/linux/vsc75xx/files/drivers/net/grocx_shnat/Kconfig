@@ -1,0 +1,29 @@
+menu "STAR SHNAT support"
+	depends on ARM && ARCH_GROCX
+
+config STAR_SHNAT
+	bool "STAR Smart HNAT Support"
+	depends on ARM && ARCH_GROCX
+	help
+	  Add STAR Smart HNAT support function in kernel
+config STAR_SHNAT_UDP_SESSION_BY_PACKET_COUNT
+	bool " UDP Session by packet count"
+	depends on NF_CT_ACCT && STAR_SHNAT
+	help
+	  Add HNAT UDP session by packet count. This is for UDP stream which might only contain traffic flow of one direction might also have chance to be accerated by HNAT
+
+config STAR_SHNAT_UDP_PACKET_COUNT_THRESH
+	int " Threshold of packet count "
+	depends on STAR_SHNAT_UDP_SESSION_BY_PACKET_COUNT
+	default 3
+	help 
+	  Threshold of packet count for UDP Session to be created
+
+config STAR_SHNAT_PACKET_SKIP_COUNT
+	int " Threshold of packet count to create TCP/UDP session"
+	default 16
+	help 
+	  Threshold of packet count for TCP/UDP Session to be created
+
+endmenu
+

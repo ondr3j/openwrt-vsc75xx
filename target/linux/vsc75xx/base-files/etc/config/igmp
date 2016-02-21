@@ -1,0 +1,11 @@
+config interface global
+	option enable	'0'
+	option pxy_enable	'0'
+	option unreg	'0'
+	option pxy_wan	'iptvwan'
+
+config interface vlan1
+	option p1_fast_leave	'0'
+	option p2_fast_leave	'0'
+	option p3_fast_leave	'0'
+	option p4_fast_leave	'0'

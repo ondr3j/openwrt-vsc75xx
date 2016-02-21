@@ -1,0 +1,74 @@
+if ARCH_GROCX
+
+menu "GROCX Options"
+
+config CONSOLE_BAUD_RATE
+	int "Console Baud Rate"
+	default 115200
+	help
+	  set the console baudrate
+
+config VIC_INTERRUPT
+	bool "Enable Vector Interrupt Controller"
+	default y
+	help
+	  enable the vector interrupt controller
+
+choice
+	prompt "Consistent DMA SIZE"
+	default GROCX_CONSISTENT_DMA_2M
+
+config GROCX_CONSISTENT_DMA_2M
+	bool "2MBytes"
+
+config GROCX_CONSISTENT_DMA_4M
+	bool "4MBytes"
+
+config GROCX_CONSISTENT_DMA_8M
+	bool "8MBytes"
+
+config GROCX_CONSISTENT_DMA_12M
+	bool "12MBytes"
+
+config GROCX_CONSISTENT_DMA_16M
+	bool "16MBytes"
+
+endchoice
+
+if PCI
+choice
+	prompt "PCI Frequency"
+	default GROCX_PCI33M
+
+config GROCX_PCI33M
+	bool "PCI_33MHz"
+
+config GROCX_PCI66M
+	bool "PCI_66MHz"
+
+endchoice
+endif
+
+config GROCX_DMA
+	bool "DMA Controller Driver"
+	default n
+	help
+	  enable the DMA controller driver
+
+config GROCX_HSDMA
+	bool "HSDMA Controller Driver"
+	default n
+	help
+	  enable the HSDMA controller driver
+
+config GROCX_INFO
+	bool "GROCX Infomation at /proc/grocx/info"
+
+comment "Third Party Support"
+
+config GROCX_EWC_SUPPORT
+	bool "EWC(PreN) Support"
+
+endmenu
+
+endif

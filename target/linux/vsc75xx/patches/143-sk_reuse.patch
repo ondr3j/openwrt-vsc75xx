@@ -1,0 +1,12 @@
+--- linux-2.6.23.17/net/core/sock.org	2012-03-06 16:41:46.772029029 +0800
++++ linux-2.6.23.17/net/core/sock.c	2012-03-06 16:43:11.036028946 +0800
+@@ -469,7 +469,8 @@
+ 			sock_reset_flag(sk, SOCK_DBG);
+ 		break;
+ 	case SO_REUSEADDR:
+-		sk->sk_reuse = valbool;
++		//sk->sk_reuse = valbool;
++		sk->sk_reuse = val; // JMY, can set 2 to force reuse
+ 		break;
+ 	case SO_TYPE:
+ 	case SO_ERROR:

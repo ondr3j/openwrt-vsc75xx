@@ -1,0 +1,696 @@
+#!/bin/sh
+## Vitesse rules starts here
+
+vtss_fw_basic() {
+    local ENABLE_HTTP
+    local ENABLE_FTP
+	local FTP_PORT
+	local ENABLE_TELNET
+	local TELNET_PORT
+    local ENABLE_HTTPS
+    local ENABLE_SSH
+    local ENABLE_ICMP
+    local ENABLE_VPN
+    local ENABLE_EXT_VPN
+    local EXT_VPN_IP
+    local LAN_IFNAME
+    local LAN_IPADDR
+    local WAN_IFNAME
+    local WAN_IPADDR
+    local ENABLE_PPTP
+	local ENABLE_EXT_PPTP
+    local EXT_PPTP_IP
+	local ENABLE_SNMP
+		
+    config_get_bool ENABLE_HTTP      $1   enable_http      0
+    config_get_bool ENABLE_FTP       $1   enable_ftp       0
+	config_get      FTP_PORT         $1   ftp_port
+	config_get_bool ENABLE_TELNET    $1   enable_telnet    0
+	config_get      TELNET_PORT      $1   telnet_port      
+    config_get_bool ENABLE_HTTPS     $1   enable_https     0
+    config_get_bool ENABLE_SSH       $1   enable_ssh       0
+    config_get_bool ENABLE_ICMP      $1   enable_icmp      0
+    config_get_bool ENABLE_VPN       $1   enable_vpn       0
+    config_get_bool ENABLE_EXT_VPN   $1   enable_ext_vpn   0
+    config_get      EXT_VPN_IP       $1   ext_vpn_ip
+    config_get_bool ENABLE_PPTP      $1   enable_pptp      0
+	config_get_bool ENABLE_EXT_PPTP  $1   enable_ext_pptp   0
+    config_get      EXT_PPTP_IP      $1   ext_pptp_ip
+    config_get      LAN_IFNAME       lan  ifname
+    config_get      LAN_IPADDR       lan  ipaddr
+	config_get      LAN_NETMASK      lan  netmask
+    config_get      WAN_IFNAME       $wan_if  ifname
+    config_get      WAN_IPADDR       $wan_if  ipaddr
+	ENABLE_SNMP=$(uci -q get dray_snmp.snmp_config.enable || echo 0)
+	ENABLE_MVLAN=$(uci -q get wan_tag.config.enabled || echo 0)
+	
+	# dest is WAN IP
+	if [ "$ENABLE_MVLAN" == "0" ]; then
+		[ -z "$WAN_IPADDR" ] || D_WANIP="-d $WAN_IPADDR"
+	fi
+	[ -z "$routing_IP" ] || D_ROUINGIP="-d $routing_IP"
+	
+	# src is LAN subnet
+	S_LAN="-s $LAN_IPADDR/$LAN_NETMASK"
+    
+	# 3 access list for remote management
+    AL1=$(uci -q get access_list.al1 2>/dev/null)
+    AL2=$(uci -q get access_list.al2 2>/dev/null)
+    AL3=$(uci -q get access_list.al3 2>/dev/null)
+    if [ "$AL1" = "al" ]; then
+        ALADDR=$(uci -q get access_list.al1.ipaddr)
+        ALMASK=$(uci -q get access_list.al1.mask)
+        if [ "$ALADDR" != "" ]; then
+        	AL1="-s $ALADDR/$ALMASK"
+        else
+        	AL1=""	
+        fi
+    else
+        AL1=""
+    fi
+    if [ "$AL2" = "al" ]; then
+        ALADDR=$(uci -q get access_list.al2.ipaddr)
+        ALMASK=$(uci -q get access_list.al2.mask)
+        if [ "$ALADDR" != "" ]; then
+        	AL2="-s $ALADDR/$ALMASK"
+        else
+        	AL2=""
+        fi
+    else
+        AL2=""
+    fi
+
+    if [ "$AL3" = "al" ]; then
+        ALADDR=$(uci -q get access_list.al3.ipaddr)
+        ALMASK=$(uci -q get access_list.al3.mask)
+        if [ "$ALADDR" != "" ]; then
+        	AL3="-s $ALADDR/$ALMASK"
+        else
+        	AL3=""	
+        fi
+    else
+        AL3=""
+    fi
+
+	# LAN PC is not allowed to access router through WAN IP ... DNS rebinding attack
+	[ -n "$D_WANIP" ] && {
+		iptables -A input_lan $D_WANIP -j REJECT
+	}
+	
+	# open tr069 port or not
+    ENABLE_TR069=$(uci -q get tr069.@tr069[0].cpe_enable)
+    TR069_PORT=$(uci -q get tr069.@tr069[0].cpe_port)
+	if [ "$ENABLE_TR069" -eq "1" ]; then
+        iptables -A $input_wan -p tcp --dport $TR069_PORT -j ACCEPT
+		iptables -t nat -A $prerouting_wan -p tcp --dport $TR069_PORT -j ACCEPT
+    fi
+
+	DISABLE_MNGTWAN=$(uci -q get network.mngtwan.disable || echo 1)
+	MNGTWAN_IF=$(uci -q get network.mngtwan.ifname)
+	if [ "$DISABLE_MNGTWAN" == "0" ]; then
+		iptables -D input -i $MNGTWAN_IF -j ACCEPT 2>/dev/null
+		iptables -D PREROUTING -t nat -i $MNGTWAN_IF -j zone_wan_prerouting 2>/dev/null
+
+		iptables -A input -i $MNGTWAN_IF -j ACCEPT
+		iptables -A PREROUTING -t nat -i $MNGTWAN_IF -j zone_wan_prerouting
+	fi
+
+	DISABLE_VOIPWAN=$(uci -q get network.voipwan.disable || echo 1)
+	if [ "$DISABLE_VOIPWAN" == "0" ]; then
+ 	    VOIPWAN_IF=$(uci -q get network.voipwan.ifname)
+		iptables -D input -i $VOIPWAN_IF -j ACCEPT 2>/dev/null
+		iptables -D PREROUTING -t nat -i $VOIPWAN_IF -j zone_wan_prerouting 2>/dev/null
+
+		iptables -A input -i $VOIPWAN_IF -j ACCEPT
+		iptables -A PREROUTING -t nat -i $VOIPWAN_IF -j zone_wan_prerouting
+	fi
+
+    if [ "$ENABLE_HTTP" -eq "1" ]; then
+        HTTP_PORT=$(grep '^server.port' /etc/lighttpd.conf | awk '{print $3}')
+        if [ "$AL1" != "" ]; then
+            iptables -A $input_wan -p tcp $AL1 $D_WANIP --dport ${HTTP_PORT:-80} -j ACCEPT
+			iptables -t nat -A $prerouting_wan -p tcp $AL1 $D_WANIP --dport ${HTTP_PORT:-80} -j ACCEPT
+			[ "$routing_EN" = "1" ] && iptables -A $input_wan -p tcp $AL1 $D_ROUINGIP --dport ${HTTP_PORT:-80} -j ACCEPT
+        fi
+
+        if [ "$AL2" != "" ]; then
+            iptables -A $input_wan -p tcp $AL2 $D_WANIP --dport ${HTTP_PORT:-80} -j ACCEPT
+			iptables -t nat -A $prerouting_wan -p tcp $AL2 $D_WANIP --dport ${HTTP_PORT:-80} -j ACCEPT
+			[ "$routing_EN" = "1" ] && iptables -A $input_wan -p tcp $AL2 $D_ROUINGIP --dport ${HTTP_PORT:-80} -j ACCEPT
+        fi
+
+        if [ "$AL3" != "" ]; then
+            iptables -A $input_wan -p tcp $AL3 $D_WANIP --dport ${HTTP_PORT:-80} -j ACCEPT
+			iptables -t nat -A $prerouting_wan -p tcp $AL3 $D_WANIP --dport ${HTTP_PORT:-80} -j ACCEPT
+			[ "$routing_EN" = "1" ] && iptables -A $input_wan -p tcp $AL3 $D_ROUINGIP --dport ${HTTP_PORT:-80} -j ACCEPT
+        fi
+
+        if [ "$AL1" = "" ] && [ "$AL2" = "" ] && [ "$AL3" = "" ]; then
+            iptables -A $input_wan -p tcp $D_WANIP --dport ${HTTP_PORT:-80} -j ACCEPT
+			iptables -t nat -A $prerouting_wan -p tcp $D_WANIP --dport ${HTTP_PORT:-80} -j ACCEPT
+			[ "$routing_EN" = "1" ] && iptables -A $input_wan -p tcp $D_ROUINGIP --dport ${HTTP_PORT:-80} -j ACCEPT
+        fi
+    fi
+    
+    if [ "$ENABLE_FTP" -eq "1" ]; then
+			if [ "$FTP_PORT" == "" -o "$FTP_PORT" == "0" ]; then
+				FTP_PORT="21"
+			fi
+    		iptables -A $input_wan -p tcp $D_WANIP --dport $FTP_PORT -j ACCEPT
+			iptables -A $input_wan -p tcp $D_WANIP --dport 36600:36700 -j ACCEPT
+			iptables -t nat -A $prerouting_wan -p tcp $D_WANIP --dport $FTP_PORT -j ACCEPT
+			iptables -t nat -A $prerouting_wan -p tcp $D_WANIP --dport 36600:36700 -j ACCEPT
+			[ "$routing_EN" = "1" ] && iptables -A $input_wan -p tcp $D_ROUINGIP --dport $FTP_PORT -j ACCEPT
+			[ "$routing_EN" = "1" ] && iptables -A $input_wan -p tcp $D_ROUINGIP --dport 36600:36700 -j ACCEPT
+    fi
+	
+	if [ "$ENABLE_TELNET" -eq "1" ]; then
+			if [ "$TELNET_PORT" == "" -o "$TELNET_PORT" == "0" ]; then
+				TELNET_PORT="23"
+			fi
+    		iptables -A $input_wan -p tcp $D_WANIP --dport $TELNET_PORT -j ACCEPT
+			iptables -t nat -A $prerouting_wan -p tcp $D_WANIP --dport $TELNET_PORT -j ACCEPT
+			[ "$routing_EN" = "1" ] && iptables -A $input_wan -p tcp $D_ROUINGIP --dport $TELNET_PORT -j ACCEPT
+    fi
+	
+    if [ "$ENABLE_HTTPS" -eq "1" ]; then
+        HTTPS_PORT=$(grep socket /etc/lighttpd-ssl.conf | sed s/[\":]/\ /g | awk '{print $5}')
+        if [ "$AL1" != "" ]; then
+            iptables -A $input_wan -p tcp $AL1 $D_WANIP --dport ${HTTPS_PORT:-443} -j ACCEPT
+			iptables -t nat -A $prerouting_wan -p tcp $AL1 $D_WANIP --dport ${HTTPS_PORT:-443} -j ACCEPT
+			[ "$routing_EN" = "1" ] && iptables -A $input_wan -p tcp $AL1 $D_ROUINGIP --dport ${HTTPS_PORT:-443} -j ACCEPT
+        fi
+
+        if [ "$AL2" != "" ]; then
+            iptables -A $input_wan -p tcp $AL2 $D_WANIP --dport ${HTTPS_PORT:-443} -j ACCEPT
+			iptables -t nat -A $prerouting_wan -p tcp $AL2 $D_WANIP --dport ${HTTPS_PORT:-443} -j ACCEPT
+			[ "$routing_EN" = "1" ] && iptables -A $input_wan -p tcp $AL2 $D_ROUINGIP --dport ${HTTPS_PORT:-443} -j ACCEPT
+        fi
+
+        if [ "$AL3" != "" ]; then
+            iptables -A $input_wan -p tcp $AL3 $D_WANIP --dport ${HTTPS_PORT:-443} -j ACCEPT
+			iptables -t nat -A $prerouting_wan -p tcp $AL3 $D_WANIP --dport ${HTTPS_PORT:-443} -j ACCEPT
+			[ "$routing_EN" = "1" ] && iptables -A $input_wan -p tcp $AL3 $D_ROUINGIP --dport ${HTTPS_PORT:-443} -j ACCEPT
+        fi
+
+        if [ "$AL1" = "" ] && [ "$AL2" = "" ] && [ "$AL3" = "" ]; then
+            iptables -A $input_wan -p tcp $D_WANIP --dport ${HTTPS_PORT:-443} -j ACCEPT
+			iptables -t nat -A $prerouting_wan -p tcp $D_WANIP --dport ${HTTPS_PORT:-443} -j ACCEPT
+			[ "$routing_EN" = "1" ] && iptables -A $input_wan -p tcp $D_ROUINGIP --dport ${HTTPS_PORT:-443} -j ACCEPT
+        fi
+    fi
+    if [ "$ENABLE_SSH" -eq "1" ]; then
+        SSH_PORT=$(uci -q get dropbear.@dropbear[0].Port)
+        if [ "$AL1" != "" ]; then
+            iptables -A $input_wan -p tcp $AL1 $D_WANIP --dport ${SSH_PORT:-22} -j ACCEPT
+			iptables -t nat -A $prerouting_wan -p tcp $AL1 $D_WANIP --dport ${SSH_PORT:-22} -j ACCEPT
+			[ "$routing_EN" = "1" ] && iptables -A $input_wan -p tcp $AL1 $D_ROUINGIP --dport ${SSH_PORT:-22} -j ACCEPT
+        fi
+
+        if [ "$AL2" != "" ]; then
+            iptables -A $input_wan -p tcp $AL2 $D_WANIP --dport ${SSH_PORT:-22} -j ACCEPT
+			iptables -t nat -A $prerouting_wan -p tcp $AL2 $D_WANIP --dport ${SSH_PORT:-22} -j ACCEPT
+			[ "$routing_EN" = "1" ] && iptables -A $input_wan -p tcp $AL2 $D_ROUINGIP --dport ${SSH_PORT:-22} -j ACCEPT
+        fi
+
+        if [ "$AL3" != "" ]; then
+            iptables -A $input_wan -p tcp $AL3 $D_WANIP --dport ${SSH_PORT:-22} -j ACCEPT
+			iptables -t nat -A $prerouting_wan -p tcp $AL3 $D_WANIP --dport ${SSH_PORT:-22} -j ACCEPT
+			[ "$routing_EN" = "1" ] && iptables -A $input_wan -p tcp $AL3 $D_ROUINGIP --dport ${SSH_PORT:-22} -j ACCEPT
+        fi
+
+        if [ "$AL1" = "" ] && [ "$AL2" = "" ] && [ "$AL3" = "" ]; then
+            iptables -A $input_wan -p tcp $D_WANIP --dport ${SSH_PORT:-22} -j ACCEPT
+			iptables -t nat -A $prerouting_wan -p tcp $D_WANIP --dport ${SSH_PORT:-22} -j ACCEPT
+			[ "$routing_EN" = "1" ] && iptables -A $input_wan -p tcp $D_ROUINGIP --dport ${SSH_PORT:-22} -j ACCEPT
+        fi
+    fi
+	# allow remote management for management WAN
+	if [ "$DISABLE_MNGTWAN" -eq "0" ]; then
+		HTTPS_PORTM=$(grep socket /etc/lighttpd-ssl.conf | sed s/[\":]/\ /g | awk '{print $5}')
+		SSH_PORTM=$(uci -q get dropbear.@dropbear[0].Port)
+		HTTP_PORTM=$(grep '^server.port' /etc/lighttpd.conf | awk '{print $3}')
+
+		iptables -A $input_wan -i $MNGTWAN_IF -p tcp $D_WANIP --dport ${HTTPS_PORTM:-443} -j ACCEPT
+		iptables -t nat -A prerouting_wan -p tcp -i $MNGTWAN_IF --dport 443 -j REDIRECT --to-ports ${HTTPS_PORTM:-443}
+		
+		iptables -A $input_wan -i $MNGTWAN_IF -p tcp $D_WANIP --dport ${SSH_PORTM:-22} -j ACCEPT
+		iptables -t nat -A prerouting_wan -p tcp -i $MNGTWAN_IF --dport 22 -j REDIRECT --to-ports ${SSH_PORTM:-22}
+
+		iptables -A $input_wan -i $MNGTWAN_IF -p tcp $D_WANIP --dport ${HTTP_PORTM:-80} -j ACCEPT
+		iptables -t nat -A prerouting_wan -p tcp -i $MNGTWAN_IF --dport 80 -j REDIRECT --to-ports ${HTTP_PORTM:-80}
+
+		if [ "$TELNET_PORT" == "" -o "$TELNET_PORT" == "0" ]; then
+				TELNET_PORT="23"
+		fi
+		iptables -A $input_wan -i $MNGTWAN_IF -p tcp $D_WANIP --dport $TELNET_PORT -j ACCEPT
+		iptables -t nat -A prerouting_wan -p tcp -i $MNGTWAN_IF --dport 23 -j REDIRECT --to-ports $TELNET_PORT
+	fi
+    if [ "$ENABLE_ICMP" -eq "1" ]; then
+        iptables -D $input_wan -p icmp --icmp-type echo-request -j DROP # Here we delete the rule we added already
+        iptables -A $input_wan -p icmp $D_WANIP --icmp-type echo-request -j ACCEPT
+		iptables -t nat -A $prerouting_wan -p icmp $D_WANIP --icmp-type echo-request -j ACCEPT
+		[ "$routing_EN" = "1" ] && iptables -A $input_wan -p icmp $D_ROUINGIP --icmp-type echo-request -j ACCEPT
+    fi
+    if [ "$ENABLE_PPTP" -eq "1" ]; then
+        iptables -A $input_wan -p tcp --dport 1723 -j ACCEPT #PPTP
+        # iptables -A $input_wan -p 47               -j ACCEPT #GRE
+        iptables -t nat -A $prerouting_wan -p tcp --dport 1723 -j ACCEPT #PPTP
+        # iptables -A output_rule -p 47             -j ACCEPT #GRE
+		iptables -t nat -A $prerouting_wan -p 47             -j ACCEPT #GRE
+        iptables -A $forwarding_wan -i ppp+ -o $LAN_IFNAME -j ACCEPT
+        iptables -A forwarding_lan -o ppp+ -j ACCEPT
+		iptables -I $input_wan -i ppp3+ -j ACCEPT     # allow pptp l2l
+		iptables -I $input_wan -i ppp6+ -j ACCEPT     # allow pptp remote dial-in
+
+		# allow pptp remote dial-in to ipsec and PPTP tunnel
+		iptables -A $forwarding_wan -i ppp6+ -o ipsec+ -j ACCEPT
+		iptables -A $forwarding_wan -i ppp6+ -o ppp3+ -j ACCEPT
+    fi
+        # allow VPN connections to get out WAN interface (to internet)
+        iptables -A $forwarding_wan -i ppp+ -o $WAN_IFNAME -j ACCEPT
+		
+    if [ "$ENABLE_SNMP" -eq "1" ]; then
+    	local snmp_port=$(uci -q get dray_snmp.snmp_config.snmp_port)
+        iptables -A $input_wan -p udp $D_WANIP --dport $snmp_port -j ACCEPT #SNMP
+		iptables -t nat -A $prerouting_wan -p udp $D_WANIP --dport $snmp_port -j ACCEPT #SNMP
+    fi
+    if [ "$ENABLE_VPN" -eq "1" ]; then
+        iptables -A $input_wan -p esp              -j ACCEPT     # allow IPSEC
+        iptables -A $input_wan -p udp --dport 500  -j ACCEPT     # allow ISAKMP
+        iptables -A $input_wan -p udp --dport 4500 -j ACCEPT     # allow NAT-T
+		iptables -A $input_wan -p udp --dport 1701 -j ACCEPT     # allow L2TP
+		iptables -I $input_wan -i ipsec+ -j ACCEPT    # allow ipsec
+
+		iptables -D $input_wan -i ppp6+ -j ACCEPT 2>/dev/null
+		iptables -I $input_wan -i ppp6+ -j ACCEPT     # allow L2TPoIPSEC remote dial-in
+		
+		# case of DMZ enabled
+		iptables -t nat -A $prerouting_wan -p esp              -j ACCEPT     # allow IPSEC
+        iptables -t nat -A $prerouting_wan -p udp --dport 500  -j ACCEPT     # allow ISAKMP
+        iptables -t nat -A $prerouting_wan -p udp --dport 4500 -j ACCEPT     # allow NAT-T
+		iptables -t nat -A $prerouting_wan -p udp --dport 1701 -j ACCEPT     # allow L2TP
+		
+        iptables -A $forwarding_wan -i ipsec0 -o $LAN_IFNAME -j ACCEPT
+		iptables -A $forwarding_wan -i ipsec0 -o $WAN_IFNAME -j ACCEPT
+        iptables -A forwarding_lan -o ipsec0 -j ACCEPT
+        iptables -t nat -A prerouting_rule -i ipsec0 -p udp --dport 1701 -j DNAT --to-destination $LAN_IPADDR
+        iptables -t nat -A prerouting_rule -p esp -j ACCEPT
+		iptables -A $forwarding_wan -i ppp+ -o $LAN_IFNAME -j ACCEPT
+        iptables -A forwarding_lan -o ppp+ -j ACCEPT
+		iptables -A $forwarding_wan -i ipsec+ -o ipsec+ -j ACCEPT
+    fi
+    if [ "$ENABLE_EXT_VPN" -eq "1" ]; then
+        iptables -A $forwarding_wan -p esp -d $EXT_VPN_IP              -j ACCEPT     # allow IPSEC
+        iptables -A $forwarding_wan -p udp -d $EXT_VPN_IP --dport 500  -j ACCEPT     # allow ISAKMP
+        iptables -A $forwarding_wan -p udp -d $EXT_VPN_IP --dport 4500 -j ACCEPT     # allow NAT-T
+        iptables -t nat -A $prerouting_wan -p esp                      -j DNAT --to-destination $EXT_VPN_IP 
+        iptables -t nat -A $prerouting_wan -p udp --dport 500          -j DNAT --to-destination $EXT_VPN_IP 
+        iptables -t nat -A $prerouting_wan -p udp --dport 4500         -j DNAT --to-destination $EXT_VPN_IP 
+    fi
+	if [ "$ENABLE_EXT_PPTP" -eq "1" ]; then
+        iptables -A $forwarding_wan -p 47  -d $EXT_PPTP_IP             -j ACCEPT     # allow PPTP
+        iptables -A $forwarding_wan -p tcp -d $EXT_PPTP_IP --dport 1723 -j ACCEPT     # allow GRE
+        iptables -t nat -A $prerouting_wan -p tcp --dport 1723         -j DNAT --to-destination $EXT_PPTP_IP 
+        iptables -t nat -A $prerouting_wan -p 47                       -j DNAT --to-destination $EXT_PPTP_IP 
+    fi
+	
+	RET=`uci -q get transmission.@transmission[0].enable || echo 0`
+	RMM=`uci -q get transmission.@transmission[0].remote_management || echo 0`
+	if [ "$RET" -eq "1" -a "$RMM" == "true" ]; then
+		BT_PORT=`uci -q get transmission.@transmission[0].rpc_port || echo '9091'`
+		iptables -A $input_wan -p tcp --dport $BT_PORT -j ACCEPT                            
+		iptables -t nat -A $prerouting_wan -p tcp --dport $BT_PORT -j ACCEPT                
+	fi
+}
+
+
+voip_rtp() {
+	vpdrv=$( lsmod | grep vpdrv)
+	if [ -n "$vpdrv" ]; then
+		rtp_start=$(cat /etc/config/voip.conf | grep rtp_start | awk '{print $3}' | tr -d [\'\"])
+		rtp_end=$(cat /etc/config/voip.conf | grep rtp_end | awk '{print $3}' | tr -d [\'\"])
+		
+		iptables -A $input_wan ${1:+-d $1} -p udp --dport ${rtp_start:-10050}:${rtp_end:-15000} -j ACCEPT
+		iptables -t nat -A $prerouting_wan ${1:+-d $1} -p udp --dport ${rtp_start:-10050}:${rtp_end:-15000} -j ACCEPT
+	fi
+}
+
+dmz_basic() {
+	# For WAN IP Alias
+	for idx in '' 1 2 3 4 5 6 7 ; do
+		config_get_bool ENABLE_DMZ      $1   enable_dmz$idx      0
+		config_get      DMZ_IP          $1   dmz_ip$idx
+		ALL_ALIAS=256
+		if [ "$ENABLE_DMZ" -eq "1" ]; then
+			case "$idx" in 
+			'')	# WAN IP
+				IP_ALIAS=$(uci -q -P /var/state get network.$wan_if.ipaddr)
+			;;
+			"$ALL_ALIAS")		# ALL WAN IP
+				IP_ALIAS=""
+			;;			
+			[1-7])	# WAN IP Alias
+				EN_ALIAS=$(uci -q get wan_ip_alias.wa"$idx".enable || echo 0)
+				[ "$EN_ALIAS" == "1" ] || continue
+				IP_ALIAS=$(uci -q get wan_ip_alias.wa"$idx".alias_ip)
+			;;
+			*)		# ALL WAN IP
+				IP_ALIAS=""
+			;;
+			esac
+		
+			logger "DMZ$idx is enabled: $IP_ALIAS --> $DMZ_IP"
+			
+			voip_rtp $IP_ALIAS
+			
+			iptables -t nat -A $prerouting_wan ${IP_ALIAS:+-d $IP_ALIAS} -p all -j DNAT --to $DMZ_IP
+			iptables -A $forwarding_wan -p all -d $DMZ_IP -j ACCEPT
+			
+			# for DMZ loopback
+			[ -z "$IP_ALIAS" ] || iptables -t nat -A prerouting_rule ${IP_ALIAS:+-d $IP_ALIAS} -p all -j DNAT --to $DMZ_IP
+			iptables -A forwarding_rule -p all -d $DMZ_IP -j ACCEPT
+			iptables -t nat -A postrouting_rule $S_LAN -p all -d $DMZ_IP -j MASQUERADE
+		fi	
+	done
+}
+
+vtss_fw_portfwd() {
+    local FW_PROTOCOL
+    local FW_FIRST_PORT
+    local FW_LAST_PORT
+    local FW_LOCAL_HOST
+    local FW_LOCAL_PORT
+	local FW_DISABLE
+	config_get  FW_DISABLE     $1  disable 0
+	[ "$FW_DISABLE" == "1" ] && return
+    config_get  FW_PROTOCOL    $1  protocol
+    config_get  FW_FIRST_PORT  $1  first_port
+    config_get  FW_LAST_PORT   $1  last_port
+    config_get  FW_LOCAL_HOST  $1  local_host
+    config_get  FW_LOCAL_PORT  $1  local_port
+	config_get  FW_WANIP_IDX   $1  wan_ip_idx 0
+    local FW_TARGET="-j DNAT --to $FW_LOCAL_HOST"
+    local FW_OPTS=""
+	ALL_ALIAS=256
+
+    if [ "$FW_LOCAL_PORT" -ne "0" ] ; then
+        FW_TARGET="${FW_TARGET}:$FW_LOCAL_PORT"
+        FW_OPTS="--dport $FW_LOCAL_PORT"
+    fi
+    if [ "$FW_LAST_PORT" -eq "0" -o "$FW_LAST_PORT" -eq "$FW_FIRST_PORT" ] ; then
+        FW_LAST_PORT=""
+    else
+        FW_LAST_PORT=":$FW_LAST_PORT"
+    fi
+
+	IP_ALIAS=""
+	case "$FW_WANIP_IDX" in 
+		0)	# WAN IP
+			IP_ALIAS=$(uci -q -P /var/state get network.$wan_if.ipaddr) # how about 3g ?
+		;;
+		*)		
+			[ "$FW_WANIP_IDX" == "$ALL_ALIAS" ] && { IP_ALIAS=$(uci -q -P /var/state get network.$wan_if.ipaddr); }	# ALL WAN IP
+		    config_cb()
+			{
+				local cfg="$CONFIG_SECTION"
+				local cfgtype
+				config_get cfgtype "$cfg" TYPE
+				case "$cfgtype" in
+					wanip-alias)
+						config_get EN_ALIAS	$cfg enable
+						config_get ALIAS_IP	$cfg alias_ip
+						config_get IP_IDX	$cfg idx
+						[ "$EN_ALIAS" == "1" ] && {
+							[ "$FW_WANIP_IDX" == "$ALL_ALIAS" -o "$IP_IDX" == "$FW_WANIP_IDX" ] && { IP_ALIAS="$IP_ALIAS $ALIAS_IP"; }
+						}
+					;;
+				esac						
+			}
+			config_load "wan_ip_alias"
+		;;
+	esac
+		
+    if [ "$FW_PROTOCOL" -eq "0" -o "$FW_PROTOCOL" -eq "1" ] ; then
+		for section in $IP_ALIAS
+        do
+			iptables -t nat -A $prerouting_wan ${section:+-d $section} -p tcp -m multiport --dports $FW_FIRST_PORT$FW_LAST_PORT $FW_TARGET
+		done
+		iptables -A $forwarding_wan -p tcp -d $FW_LOCAL_HOST $FW_OPTS -j ACCEPT	
+
+		# for NAT loopback
+        for section in $IP_ALIAS
+        do
+            iptables -t nat -A prerouting_rule ${section:+-d $section} -p tcp -m multiport --dports $FW_FIRST_PORT$FW_LAST_PORT $FW_TARGET
+        done
+		iptables -A forwarding_rule -p tcp -d $FW_LOCAL_HOST $FW_OPTS -j ACCEPT
+		iptables -t nat -A postrouting_rule $S_LAN -p tcp -d $FW_LOCAL_HOST $FW_OPTS -j MASQUERADE
+    fi
+	
+    if [ "$FW_PROTOCOL" -eq "0" -o "$FW_PROTOCOL" -eq "2" ] ; then
+		for section in $IP_ALIAS
+        do
+			iptables -t nat -A $prerouting_wan ${section:+-d $section} -p udp -m multiport --dports $FW_FIRST_PORT$FW_LAST_PORT $FW_TARGET
+		done
+        iptables -A $forwarding_wan -p udp -d $FW_LOCAL_HOST $FW_OPTS -j ACCEPT
+		
+		# for NAT loopback
+        for section in $IP_ALIAS
+        do
+            iptables -t nat -A prerouting_rule ${section:+-d $section} -p udp -m multiport --dports $FW_FIRST_PORT$FW_LAST_PORT $FW_TARGET
+        done
+		iptables -A forwarding_rule -p udp -d $FW_LOCAL_HOST $FW_OPTS -j ACCEPT
+		iptables -t nat -A postrouting_rule $S_LAN -p udp -d $FW_LOCAL_HOST $FW_OPTS -j MASQUERADE
+    fi
+}
+
+# function to setup session limit rule
+set_sl_rule() {
+    local START_IP
+    local END_IP
+    local MAX_SESSION
+    config_get  START_IP    $1  start_ip
+    config_get  END_IP      $1  end_ip
+    config_get  MAX_SESSION $1  max_session
+    local CONN_LIMIT="-m connlimit --connlimit-above $MAX_SESSION"
+    local IP_RANGE="-m iprange --src-range $START_IP-$END_IP"
+    
+    iptables -A session_limit -p all $IP_RANGE $CONN_LIMIT -j LOG\
+     --log-prefix "[Session_limit]" --log-level 4
+    iptables -A session_limit -p all $IP_RANGE $CONN_LIMIT -j DROP
+}
+
+session_limit() {
+    local ENABLE_SLIMIT
+
+    config_get_bool ENABLE_SLIMIT      $1   enable_session_limit      0
+
+    if [ "$ENABLE_SLIMIT" -eq "1" ]; then
+        iptables -N session_limit
+        iptables -I FORWARD -j session_limit
+    	config_foreach set_sl_rule sl
+    fi
+}
+
+# function to setup bandwidth limit rule
+set_bl_rule() {
+    local START_IP
+    local END_IP
+    local TX_LIMIT
+    local RX_LIMIT
+    
+    config_get  START_IP    $1  start_ip
+    config_get  END_IP      $1  end_ip
+    config_get  TX_LIMIT    $1  tx_limit
+    config_get	RX_LIMIT    $1  rx_limit
+    local IP_RANGE="-m ratelimit --ip-range $START_IP-$END_IP"
+    local RATE_LIMIT="--tx-ratelimit $TX_LIMIT --rx-ratelimit $RX_LIMIT"
+
+    iptables -A bandwidth_limit $IP_RANGE $RATE_LIMIT -j DROP
+}
+
+bandwidth_limit() {
+    local ENABLE_BLIMIT
+
+    config_get_bool ENABLE_BLIMIT      $1   enable_bandwidth_limit      0
+
+    if [ "$ENABLE_BLIMIT" -eq "1" ]; then
+        iptables -N bandwidth_limit
+        iptables -I FORWARD -j bandwidth_limit
+    	config_foreach set_bl_rule bl
+    fi
+}
+
+set_static_route() {
+	local ENABLE
+	local NET
+	local MASK
+	local GATEWAY
+	local DEV
+	config_get_bool ENABLE  $1	enable  0
+	if [ "$ENABLE" -eq "1" ]; then
+		config_get NET  $1	net
+		config_get MASK $1	mask
+		config_get GATEWAY	$1	gateway
+		config_get DEV	$1	dev
+		logger "route add -net $NET netmask $MASK gw $GATEWAY"
+		NET=`ipcalc.sh $NET $MASK | grep NETWORK | cut -d '=' -f 2`
+		route add -net $NET netmask $MASK gw $GATEWAY
+	fi
+}
+
+portfwd_illegal_access() {
+	local LOCAL_WAN_IP
+	local PROTO
+
+	#use proto to get wan ip
+	if [ "$proto" = "static" ]; then
+		#static ip
+		config_get LOCAL_WAN_IP $wan_if ipaddr	
+	else
+		#pppoe and others
+		config_load /var/state/network 
+		config_get LOCAL_WAN_IP $wan_if ipaddr	
+	fi
+#	echo $LOCAL_WAN_IP
+#	if [ $LOCAL_WAN_IP != "" ]; then	
+#iptables -t nat -A $prerouting_wan -p tcp -d $LOCAL_WAN_IP -j LOG\
+# --log-prefix "[Illegal_access]" --log-level 4
+#iptables -t nat -A $prerouting_wan -p udp -d $LOCAL_WAN_IP -j LOG\
+# --log-prefix "[Illegal_access]" --log-level 4
+# 	else
+# 		echo "portfwd can't get wan ip"
+# 	fi
+
+}
+
+# check dest WAN up or not ?????
+En3gBackUp=$(uci -q get network.3gwan.backup || echo 0)
+Is3gWANUP=$(uci -q -P /var/state get network.3gwan.up || echo 0)
+IsWANUP=$(uci -q -P /var/state get network.wan.up || echo 0)
+[ "$En3gBackUp" == "1" -a "$Is3gWANUP" == "1"  -a "$IsWANUP" == "0" ] && {	# 3g backup wan not ready...
+	# 3gwan when 3g backup actived
+	forwarding_wan="forwarding_3gwan"
+	input_wan="input_3gwan"
+	prerouting_wan="prerouting_3gwan"
+	zone_wan_ACCEPT="zone_3gwan_ACCEPT"
+	uci_revert_state firewall core '3gwan_zone'
+	uci_set_state firewall core '3gwan_zone' '3gwan'	# for MINIUPNPD
+	uci -q set upnpd.config.external_iface='3gwan'
+	wan_if="3gwan"
+	#zone_3gwan
+	#zone_3gwan_DROP
+	#zone_3gwan_MSSFIX
+	#zone_3gwan_REJECT
+	#zone_3gwan_forward
+	
+} || {
+	forwarding_wan="forwarding_wan"
+	input_wan="input_wan"
+	prerouting_wan="prerouting_wan"
+	zone_wan_ACCEPT="zone_wan_ACCEPT"
+	uci_revert_state firewall core wan_zone
+	uci_set_state firewall core wan_zone 'wan'	# for MINIUPNPD
+	uci -q set upnpd.config.external_iface='wan'
+	wan_if="wan"
+	#zone_wan 
+	#zone_wan_DROP
+	#zone_wan_MSSFIX
+	#zone_wan_REJECT
+	#zone_wan_forward
+}
+
+#enable LAN to LAN forwarding which may be static route
+LANIFNAME=`uci -q get -P /var/state network.lan.ifname || echo 'br-lan'`
+iptables -I FORWARD -i $LANIFNAME -o $LANIFNAME -j ACCEPT
+# Open up for IGMP
+iptables -I FORWARD -d 224.0.0.0/4 -j ACCEPT
+iptables -I INPUT -d 224.0.0.0/4 -j ACCEPT
+
+# for traffic from wan to routing subnet
+routing_EN=`uci -q get routing.lan2.enable || echo 0`
+[ "$routing_EN" = "1" ] && {
+	routing_IP=`uci -q get routing.lan2.lan2_ip || echo '192.168.2.1'`
+	routing_MASK=`uci -q get routing.lan2.lan2_mask || echo '255.255.255.0'`
+	iptables -A $input_wan -s $routing_IP/$routing_MASK -d $routing_IP/$routing_MASK -j ACCEPT	# accept to router
+	iptables -A $forwarding_wan -p all -d $routing_IP/$routing_MASK -j ACCEPT	# accept to 2nd subnet
+}
+
+# Disable ping request from wan by default - and remove the rule again if config enables it
+iptables -A $input_wan -p icmp --icmp-type echo-request -j DROP
+# Disable packets go to WCF Queues
+echo 0 > /sys/module/ip_set_webcategory/parameters/ct_info4
+
+if [ -f /etc/config/grocx/vtss_fw ]; then
+    config_load /etc/config/grocx/vtss_fw
+    config_foreach vtss_fw_basic   basic
+    config_foreach vtss_fw_portfwd portfwd
+    #portfwd_illegal_access
+fi
+
+#if [ -f /etc/config/grocx/bandwidth_limit ]; then
+#    config_load /etc/config/grocx/bandwidth_limit
+#    config_foreach bandwidth_limit   bl_basic
+#fi
+
+#if [ -f /etc/config/grocx/session_limit ]; then
+#    config_load /etc/config/grocx/session_limit
+#    config_foreach session_limit   sl_basic
+#fi
+
+# Add Web filter rule
+sh /lib/firewall/web_filter.sh
+#add WCF
+/etc/init.d/commtouch restart
+# Add IM/P2P Blocking
+sh /lib/firewall/appe.sh
+
+# Add static route for eth1.x when using PPTP/L2TP WAN 
+wan_proto=$(uci -q get network.$wan_if.proto)
+if [ "$wan_proto" == "l2tp" -o "$wan_proto" == "pptp" ]; then
+	local WAN_DEV
+	unit=$(uci -q get network.$wan_if.unit || echo '0')
+	WAN_DEV="ppp$unit"
+	iptables -t filter -A $zone_wan_ACCEPT -o $WAN_DEV -j ACCEPT
+	iptables -t nat -A POSTROUTING $S_LAN -o $WAN_DEV -j MASQUERADE
+fi
+
+# restart miniupnpd
+/etc/init.d/miniupnpd restart
+
+# Open port for SIP signal, needed for peer to peer function
+vpdrv=$( lsmod | grep vpdrv)
+if [ -n "$vpdrv" ]; then
+   zone_sip_accept="zone_sip_accept"
+   prerouting_sip="prerouting_sip"
+   sip_port_list="/tmp/sip_port_list"
+   
+   iptables -N $zone_sip_accept
+   iptables -F $zone_sip_accept
+   iptables -A $zone_sip_accept -p udp --dport 5060 -j ACCEPT
+   iptables -A $input_wan -p udp -j $zone_sip_accept
+   
+   iptables -t nat -N $prerouting_sip
+   iptables -t nat -F $prerouting_sip
+   iptables -t nat -A $prerouting_sip -p udp --dport 5060 -j ACCEPT
+   iptables -t nat -A $prerouting_wan -p udp -j $prerouting_sip
+   
+   cat /etc/config/voip.conf | grep "option port" > $sip_port_list
+   while read line
+   do
+     line=$(echo $line | awk '{print $3}' | cut -d "'" -f 2)
+     if [ "$line" != "" -a "$line" != "5060" ]; then
+       iptables -A $zone_sip_accept -p udp --dport $line -j ACCEPT
+       iptables -t nat -A $prerouting_sip -p udp --dport $line -j ACCEPT
+     fi
+   done < $sip_port_list
+   rm $sip_port_list
+fi
+
+if [ -f /etc/config/grocx/vtss_fw ]; then
+	# DMZ setting must be after open port
+    config_foreach dmz_basic basic
+fi
+
+# Add NAT rules for policy route
+/www/cgi-bin/webstax/config --apply_policy_route_nat > /dev/null 2>&1

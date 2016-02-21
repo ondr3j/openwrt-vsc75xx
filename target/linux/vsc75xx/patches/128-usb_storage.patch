@@ -1,0 +1,36 @@
+diff -urN linux-2.6.23.9-orig/drivers/usb/storage/usb.c linux-2.6.23.9/drivers/usb/storage/usb.c
+--- linux-2.6.23.9-orig/drivers/usb/storage/usb.c	2010-05-07 17:05:28.000000000 +0800
++++ linux-2.6.23.9/drivers/usb/storage/usb.c	2010-05-07 17:04:42.000000000 +0800
+@@ -431,6 +431,20 @@
+  * Device probing and disconnecting
+  ***********************************************************************/
+ 
++//check if it's special device, we don't mount usb-storage driver on these devices  //Bruce Hsu
++static int ZTE_dev_check(struct us_data *us)
++{
++    if((us->pusb_dev->descriptor.idVendor)==0x19d2){   //ZTE device
++        printk("ZTE device check: Vendor %2X, Product %2X\n",us->pusb_dev->descriptor.idVendor,us->pusb_dev->descriptor.idProduct);
++        return -ENODEV;
++    }else if((us->pusb_dev->descriptor.idVendor)==0x1a8d){   //BandLuxe device
++        printk("BandLuxe device check: Vendor %2X, Product %2X\n",us->pusb_dev->descriptor.idVendor,us->pusb_dev->descriptor.idProduct);
++        return -ENODEV;
++    }
++
++    return 0;
++}
++
+ /* Associate our private data with the USB device */
+ static int associate_dev(struct us_data *us, struct usb_interface *intf)
+ {
+@@ -973,6 +987,11 @@
+ 	if (result)
+ 		goto BadDevice;
+ 
++	//check ZTE device   //Add by Bruce Hsu 2010/04/21
++    result = ZTE_dev_check(us);
++    if (result)
++        goto BadDevice;
++		
+ 	/*
+ 	 * Get the unusual_devs entries and the descriptors
+ 	 *

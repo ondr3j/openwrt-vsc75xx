@@ -1,0 +1,13 @@
+--- linux-2.6.23.17/net/ipv6/ip6_output.c-orig	2011-08-10 11:17:32.000000000 +0800
++++ linux-2.6.23.17/net/ipv6/ip6_output.c	2011-12-08 14:12:08.000000000 +0800
+@@ -467,8 +467,8 @@
+ 		int addrtype = ipv6_addr_type(&hdr->saddr);
+ 
+ 		/* This check is security critical. */
+-		if (addrtype & (IPV6_ADDR_MULTICAST|IPV6_ADDR_LOOPBACK))
+-			goto error;
++		if (addrtype == IPV6_ADDR_ANY || addrtype & (IPV6_ADDR_MULTICAST | IPV6_ADDR_LOOPBACK))
++		    goto error;
+ 		if (addrtype & IPV6_ADDR_LINKLOCAL) {
+ 			icmpv6_send(skb, ICMPV6_DEST_UNREACH,
+ 				ICMPV6_NOT_NEIGHBOUR, 0, skb->dev);

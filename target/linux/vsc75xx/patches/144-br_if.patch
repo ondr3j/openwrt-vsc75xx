@@ -1,0 +1,29 @@
+--- linux-2.6.23.17/net/bridge/br_if.c	2012-03-29 17:52:51.136657000 +0800
++++ linux-2.6.23.17/net/bridge/br_if.c	2012-03-29 18:50:18.175503000 +0800
+@@ -25,6 +25,8 @@
+ 
+ #include "br_private.h"
+ 
++struct net_device *brlan_dev = NULL;
++EXPORT_SYMBOL(brlan_dev);
+ /*
+  * Determine initial path cost based on speed.
+  * using recommendations from 802.1d standard
+@@ -168,6 +170,7 @@
+ 
+ 	br_sysfs_delbr(br->dev);
+ 	unregister_netdevice(br->dev);
++	brlan_dev = NULL;
+ }
+ 
+ static struct net_device *new_bridge_dev(const char *name)
+@@ -293,6 +296,9 @@
+ 	ret = br_sysfs_addbr(dev);
+ 	if (ret)
+ 		unregister_netdevice(dev);
++	else{
++		brlan_dev = dev;
++	}
+  out:
+ 	rtnl_unlock();
+ 	return ret;

@@ -1,0 +1,173 @@
+diff -urN linux-2.6.23.9-orig/include/linux/if.h linux-2.6.23.9/include/linux/if.h
+--- linux-2.6.23.9-orig/include/linux/if.h	2009-02-18 19:09:08.000000000 +0800
++++ linux-2.6.23.9/include/linux/if.h	2009-02-18 19:09:08.000000000 +0800
+@@ -61,6 +61,7 @@
+ #define IFF_MASTER_ALB	0x10		/* bonding master, balance-alb.	*/
+ #define IFF_BONDING	0x20		/* bonding master or slave	*/
+ #define IFF_SLAVE_NEEDARP 0x40		/* need ARPs for validation	*/
++#define IFF_LAN	0x80			/* Set for LAN interface */
+ 
+ #define IF_GET_IFACE	0x0001		/* for querying only */
+ #define IF_GET_PROTO	0x0002
+diff -urN linux-2.6.23.9-orig/net/core/dev.c linux-2.6.23.9/net/core/dev.c
+--- linux-2.6.23.9-orig/net/core/dev.c	2009-02-18 19:09:08.000000000 +0800
++++ linux-2.6.23.9/net/core/dev.c	2009-02-18 19:09:08.000000000 +0800
+@@ -3541,7 +3541,13 @@
+ 			goto out;
+ 	}
+ 
++	printk("register netdev : %s\r\n", dev->name);
+ 	err = register_netdevice(dev);
++
++	// Fanny : Add flag for LAN interface
++	if(!strcmp(dev->name, "eth0")) {
++		dev->priv_flags = IFF_LAN;
++	}
+ out:
+ 	rtnl_unlock();
+ 	return err;
+diff -urN linux-2.6.23.9-orig/net/netfilter/Kconfig linux-2.6.23.9/net/netfilter/Kconfig
+--- linux-2.6.23.9-orig/net/netfilter/Kconfig	2009-02-18 19:09:08.000000000 +0800
++++ linux-2.6.23.9/net/netfilter/Kconfig	2009-02-18 19:09:08.000000000 +0800
+@@ -484,6 +484,14 @@
+ 	  This match allows you to match against the number of parallel
+ 	  connections to a server per client IP address (or address block).
+ 
++config NETFILTER_XT_MATCH_RATELIMIT
++	tristate '"ratelimit" match support"'
++	depends on NETFILTER_XTABLES
++	depends on NF_CONNTRACK
++	---help---
++	  This match allows you to match against the tx/rx rate
++	  per client IP address (or address block).
++
+ config NETFILTER_XT_MATCH_CONNMARK
+ 	tristate  '"connmark" connection mark match support'
+ 	depends on NETFILTER_XTABLES
+diff -urN linux-2.6.23.9-orig/net/netfilter/Makefile linux-2.6.23.9/net/netfilter/Makefile
+--- linux-2.6.23.9-orig/net/netfilter/Makefile	2009-02-18 19:09:08.000000000 +0800
++++ linux-2.6.23.9/net/netfilter/Makefile	2009-02-18 19:09:08.000000000 +0800
+@@ -58,6 +58,7 @@
+ obj-$(CONFIG_NETFILTER_XT_MATCH_COMMENT) += xt_comment.o
+ obj-$(CONFIG_NETFILTER_XT_MATCH_CONNBYTES) += xt_connbytes.o
+ obj-$(CONFIG_NETFILTER_XT_MATCH_CONNLIMIT) += xt_connlimit.o
++obj-$(CONFIG_NETFILTER_XT_MATCH_RATELIMIT) += xt_ratelimit.o
+ obj-$(CONFIG_NETFILTER_XT_MATCH_CONNMARK) += xt_connmark.o
+ obj-$(CONFIG_NETFILTER_XT_MATCH_CONNTRACK) += xt_conntrack.o
+ obj-$(CONFIG_NETFILTER_XT_MATCH_DCCP) += xt_dccp.o
+diff -urN linux-2.6.23.9-orig/net/netfilter/nf_conntrack_proto_tcp.c linux-2.6.23.9/net/netfilter/nf_conntrack_proto_tcp.c
+--- linux-2.6.23.9-orig/net/netfilter/nf_conntrack_proto_tcp.c	2009-02-18 19:09:08.000000000 +0800
++++ linux-2.6.23.9/net/netfilter/nf_conntrack_proto_tcp.c	2009-02-23 12:13:41.000000000 +0800
+@@ -29,6 +29,30 @@
+ #include <asm/arch/star_shnat_hook.h>
+ #endif
+ 
++/* Fanny : Add this global structure for bandwidth limit */
++#if (CONFIG_NETFILTER_XT_MATCH_RATELIMIT_MODULE==1) || (CONFIG_NETFILTER_XT_MATCH_RATELIMIT==1)
++#include <linux/netfilter/xt_ratelimit.h>
++
++struct bl_iprange bandwidth_limit_ip[MAX_BLIMIT_CNT] = {0};
++int bandwidth_limit_enabled = 0;
++
++int check_blimit_range(unsigned long addr1, unsigned long addr2)
++{
++	int i;
++
++	/* Check whether this ip in our checking range */
++	for(i=0; i<MAX_BLIMIT_CNT; i++){
++		if ((ntohl(addr1) >= bandwidth_limit_ip[i].min_ip
++			  && ntohl(addr1) <= bandwidth_limit_ip[i].max_ip) ||
++		   (ntohl(addr2) >= bandwidth_limit_ip[i].min_ip
++			  && ntohl(addr2) <= bandwidth_limit_ip[i].max_ip)) {
++			return true;
++		}
++	}
++	return false;
++}
++#endif
++
+ /* Protects conntrack->proto.tcp */
+ static DEFINE_RWLOCK(tcp_lock);
+ 
+@@ -851,6 +875,8 @@
+ 	new_state = tcp_conntracks[dir][index][old_state];
+ 	tuple = &conntrack->tuplehash[dir].tuple;
+ 
++	//printk("check src addr=0x%x, dst=0x%x, dir=%d\r\n", tuple->src.u3.ip, tuple->dst.u3.ip, dir);
++
+ 	switch (new_state) {
+ 	case TCP_CONNTRACK_SYN_SENT:
+ 		if (old_state < TCP_CONNTRACK_TIME_WAIT)
+@@ -996,6 +1022,16 @@
+ 		nf_conntrack_event_cache(IPCT_STATUS, skb);
+ #if defined(CONFIG_STAR_SHNAT)
+ 		if (shnat_hook_ready) {
++	#if (CONFIG_NETFILTER_XT_MATCH_RATELIMIT_MODULE==1) || (CONFIG_NETFILTER_XT_MATCH_RATELIMIT==1)
++			/* Not in bandwidth limit range then add this connection into hardware nat table. */
++			if(bandwidth_limit_enabled){
++				/* Connection from LAN->WAN */ 
++				if(!check_blimit_range((conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip),
++					(conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip))){
++					shnat_nf_add_session_hook(conntrack, NULL, 1);
++				}
++			}else
++	#endif
+ 			shnat_nf_add_session_hook(conntrack, NULL, 1);
+ 		}
+ #endif
+@@ -1450,3 +1486,8 @@
+ #endif
+ };
+ EXPORT_SYMBOL_GPL(nf_conntrack_l4proto_tcp6);
++#if (CONFIG_NETFILTER_XT_MATCH_RATELIMIT_MODULE==1) || (CONFIG_NETFILTER_XT_MATCH_RATELIMIT==1)
++EXPORT_SYMBOL_GPL(bandwidth_limit_ip);
++EXPORT_SYMBOL_GPL(bandwidth_limit_enabled);
++#endif
++
+diff -urN linux-2.6.23.9-orig/net/netfilter/nf_conntrack_proto_udp.c linux-2.6.23.9/net/netfilter/nf_conntrack_proto_udp.c
+--- linux-2.6.23.9-orig/net/netfilter/nf_conntrack_proto_udp.c	2009-02-18 19:09:08.000000000 +0800
++++ linux-2.6.23.9/net/netfilter/nf_conntrack_proto_udp.c	2009-02-23 12:13:41.000000000 +0800
+@@ -26,6 +26,10 @@
+ #include <asm/arch/star_shnat_hook.h>
+ #endif
+ 
++#if (CONFIG_NETFILTER_XT_MATCH_RATELIMIT_MODULE==1) || (CONFIG_NETFILTER_XT_MATCH_RATELIMIT==1)
++#include <linux/netfilter/xt_ratelimit.h>
++#endif
++
+ static unsigned int nf_ct_udp_timeout __read_mostly = 30*HZ;
+ static unsigned int nf_ct_udp_timeout_stream __read_mostly = 180*HZ;
+ 
+@@ -91,6 +95,16 @@
+ 			nf_conntrack_event_cache(IPCT_STATUS, skb);
+ #if defined(CONFIG_STAR_SHNAT)
+ 			if (shnat_hook_ready) {
++	#if (CONFIG_NETFILTER_XT_MATCH_RATELIMIT_MODULE==1) || (CONFIG_NETFILTER_XT_MATCH_RATELIMIT==1)
++				/* Not in bandwidth limit range then add this connection into hardware nat table. */
++				if(bandwidth_limit_enabled){
++					if(!check_blimit_range((conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip),
++									(conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip))){
++						//printk("src=0x%x, dst=0x%x, dir=%d\r\n", conntrack->tuplehash[CTINFO2DIR(ctinfo)].tuple.src.u3.ip, conntrack->tuplehash[CTINFO2DIR(ctinfo)].tuple.dst.u3.ip, CTINFO2DIR(ctinfo));
++						shnat_nf_add_session_hook(conntrack, NULL, 1);
++					}
++				}else
++	#endif
+ 				shnat_nf_add_session_hook(conntrack, NULL, 0);
+ 			}
+ 		}
+@@ -101,6 +115,15 @@
+ //printk("%s: packet=%d\n",__FUNCTION__,conntrack->counters[CTINFO2DIR(ctinfo)].packets);
+ 		if (conntrack->counters[CTINFO2DIR(ctinfo)].packets >= (CONFIG_STAR_SHNAT_UDP_PACKET_COUNT_THRESH-1)) {
+ 			if (shnat_hook_ready) {
++	#if (CONFIG_NETFILTER_XT_MATCH_RATELIMIT_MODULE==1) || (CONFIG_NETFILTER_XT_MATCH_RATELIMIT==1)
++				/* Not in bandwidth limit range then add this connection into hardware nat table. */
++				if(bandwidth_limit_enabled){
++					if(!check_blimit_range((conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip),
++						(conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip))){
++						shnat_nf_add_session_hook(conntrack, NULL, 1);
++					}
++				}else
++	#endif
+ 				shnat_nf_add_session_hook(conntrack, NULL, 0);
+ 			}
+ 		}

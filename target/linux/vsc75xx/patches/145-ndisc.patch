@@ -1,0 +1,11 @@
+--- linux-2.6.23.17/net/ipv6/ndisc.c	2012-03-30 11:00:02.238653000 +0800
++++ linux-2.6.23.17/net/ipv6/ndisc.c	2012-03-30 11:07:05.349545000 +0800
+@@ -1024,7 +1024,7 @@
+ 			   skb->dev->name);
+ 		return;
+ 	}
+-	if (in6_dev->cnf.forwarding || in6_dev->cnf.accept_ra < 2) {
++	if (in6_dev->cnf.forwarding || !in6_dev->cnf.accept_ra) {
+ 		in6_dev_put(in6_dev);
+ 		return;
+ 	}

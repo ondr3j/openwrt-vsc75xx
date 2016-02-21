@@ -1,0 +1,386 @@
+diff -ur -x CVS linux-2.6.23.9/drivers/char/Kconfig linux-2.6.23.9-grocx/drivers/char/Kconfig
+--- linux-2.6.23.9/drivers/char/Kconfig	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/char/Kconfig	2007-12-04 04:24:54.000000000 +0100
+@@ -1064,5 +1064,10 @@
+ 
+ source "drivers/s390/char/Kconfig"
+ 
++config VITGENIO
++	tristate "VITESSE-Generic multi-purpose IO"
++	help
++	  Include the Vitesse Generic multi-purpose IO layer.
++
+ endmenu
+ 
+diff -ur -x CVS linux-2.6.23.9/drivers/char/Makefile linux-2.6.23.9-grocx/drivers/char/Makefile
+--- linux-2.6.23.9/drivers/char/Makefile	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/char/Makefile	2007-12-04 04:24:54.000000000 +0100
+@@ -95,6 +95,7 @@
+ obj-$(CONFIG_CS5535_GPIO)	+= cs5535_gpio.o
+ obj-$(CONFIG_GPIO_VR41XX)	+= vr41xx_giu.o
+ obj-$(CONFIG_GPIO_TB0219)	+= tb0219.o
++obj-$(CONFIG_VITGENIO)          += vitgenio.o
+ obj-$(CONFIG_TELCLOCK)		+= tlclk.o
+ 
+ obj-$(CONFIG_MWAVE)		+= mwave/
+Only in linux-2.6.23.9-grocx/drivers/char: vitgenio.c
+diff -ur -x CVS linux-2.6.23.9/drivers/char/watchdog/Kconfig linux-2.6.23.9-grocx/drivers/char/watchdog/Kconfig
+--- linux-2.6.23.9/drivers/char/watchdog/Kconfig	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/char/watchdog/Kconfig	2007-12-04 04:24:54.000000000 +0100
+@@ -66,6 +66,15 @@
+ 	  Watchdog timer embedded into AT91RM9200 chips. This will reboot your
+ 	  system when the timeout is reached.
+ 
++config GROCX_WATCHDOG
++	tristate "GROCX Watchdog"
++	depends on WATCHDOG && ARCH_GROCX
++	help
++	  Say Y here if to include support for the watchdog timer
++	  in the G-Rocx network processors.
++
++	  Say N if you are unsure.
++
+ config 21285_WATCHDOG
+ 	tristate "DC21285 watchdog"
+ 	depends on FOOTBRIDGE
+diff -ur -x CVS linux-2.6.23.9/drivers/char/watchdog/Makefile linux-2.6.23.9-grocx/drivers/char/watchdog/Makefile
+--- linux-2.6.23.9/drivers/char/watchdog/Makefile	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/char/watchdog/Makefile	2007-12-04 04:24:54.000000000 +0100
+@@ -35,6 +35,7 @@
+ obj-$(CONFIG_S3C2410_WATCHDOG) += s3c2410_wdt.o
+ obj-$(CONFIG_SA1100_WATCHDOG) += sa1100_wdt.o
+ obj-$(CONFIG_MPCORE_WATCHDOG) += mpcore_wdt.o
++obj-$(CONFIG_GROCX_WATCHDOG) += grocx_wdt.o
+ obj-$(CONFIG_EP93XX_WATCHDOG) += ep93xx_wdt.o
+ obj-$(CONFIG_PNX4008_WATCHDOG) += pnx4008_wdt.o
+ obj-$(CONFIG_IOP_WATCHDOG) += iop_wdt.o
+Only in linux-2.6.23.9-grocx/drivers/char/watchdog: grocx_wdt.c
+diff -ur -x CVS linux-2.6.23.9/drivers/i2c/busses/Kconfig linux-2.6.23.9-grocx/drivers/i2c/busses/Kconfig
+--- linux-2.6.23.9/drivers/i2c/busses/Kconfig	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/i2c/busses/Kconfig	2007-12-04 04:24:54.000000000 +0100
+@@ -4,6 +4,10 @@
+ 
+ menu "I2C Hardware Bus support"
+ 
++config I2C_GROCX
++        tristate "GROCX I2C" 
++        depends on I2C && ARCH_GROCX
++
+ config I2C_ALI1535
+ 	tristate "ALI 1535"
+ 	depends on PCI
+diff -ur -x CVS linux-2.6.23.9/drivers/i2c/busses/Makefile linux-2.6.23.9-grocx/drivers/i2c/busses/Makefile
+--- linux-2.6.23.9/drivers/i2c/busses/Makefile	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/i2c/busses/Makefile	2007-12-04 04:24:54.000000000 +0100
+@@ -52,6 +52,7 @@
+ obj-$(CONFIG_I2C_VOODOO3)	+= i2c-voodoo3.o
+ obj-$(CONFIG_SCx200_ACB)	+= scx200_acb.o
+ obj-$(CONFIG_SCx200_I2C)	+= scx200_i2c.o
++obj-$(CONFIG_I2C_GROCX)	+= i2c-grocx.o
+ 
+ ifeq ($(CONFIG_I2C_DEBUG_BUS),y)
+ EXTRA_CFLAGS += -DDEBUG
+Only in linux-2.6.23.9-grocx/drivers/i2c/busses: i2c-grocx.c
+diff -ur -x CVS linux-2.6.23.9/drivers/ide/setup-pci.c linux-2.6.23.9-grocx/drivers/ide/setup-pci.c
+--- linux-2.6.23.9/drivers/ide/setup-pci.c	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/ide/setup-pci.c	2007-12-04 04:24:54.000000000 +0100
+@@ -185,7 +185,11 @@
+ 	if (hwif->mate && hwif->mate->dma_base) {
+ 		dma_base = hwif->mate->dma_base - (hwif->channel ? 0 : 8);
+ 	} else {
++#if defined(CONFIG_ARCH_GROCX)
++		dma_base = ioremap(pci_resource_start(dev, 4), pci_resource_len(dev, 4));
++#else
+ 		dma_base = pci_resource_start(dev, 4);
++#endif
+ 		if (!dma_base) {
+ 			printk(KERN_ERR "%s: dma_base is invalid\n",
+ 					hwif->cds->name);
+@@ -405,9 +409,13 @@
+ 		/*  Possibly we should fail if these checks report true */
+ 		ide_pci_check_iomem(dev, d, 2*port);
+ 		ide_pci_check_iomem(dev, d, 2*port+1);
+- 
++#if defined(CONFIG_ARCH_GROCX)
++		ctl  = ioremap(pci_resource_start(dev, 2*port+1), pci_resource_len(dev, 2*port+1));
++		base = ioremap(pci_resource_start(dev, 2*port), pci_resource_len(dev, 2*port));
++#else 
+ 		ctl  = pci_resource_start(dev, 2*port+1);
+ 		base = pci_resource_start(dev, 2*port);
++#endif
+ 		if ((ctl && !base) || (base && !ctl)) {
+ 			printk(KERN_ERR "%s: inconsistent baseregs (BIOS) "
+ 				"for port %d, skipping\n", d->name, port);
+diff -ur -x CVS linux-2.6.23.9/drivers/mtd/maps/Kconfig linux-2.6.23.9-grocx/drivers/mtd/maps/Kconfig
+--- linux-2.6.23.9/drivers/mtd/maps/Kconfig	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/mtd/maps/Kconfig	2007-12-04 04:24:54.000000000 +0100
+@@ -101,6 +101,17 @@
+ 	  This provides support for the embedded root file system
+           on PMC MSP devices.  This memory is mapped as a MTD block device.
+ 
++config MTD_GROCX
++        tristate "CFI Flash device mapped on GROCX Scutum demo board (Spansion S29GL064A)"
++        depends on ARM && MTD_CFI && ARCH_GROCX
++
++
++
++config MTD_GROCX_SPLIT
++        tristate "Automatically find and split GROCX firmware partitions"
++        depends on ARCH_GROCX
++        default y
++
+ config MTD_SUN_UFLASH
+ 	tristate "Sun Microsystems userflash support"
+ 	depends on SPARC && MTD_CFI && PCI
+diff -ur -x CVS linux-2.6.23.9/drivers/mtd/maps/Makefile linux-2.6.23.9-grocx/drivers/mtd/maps/Makefile
+--- linux-2.6.23.9/drivers/mtd/maps/Makefile	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/mtd/maps/Makefile	2007-12-04 04:24:54.000000000 +0100
+@@ -71,3 +71,5 @@
+ obj-$(CONFIG_MTD_OMAP_NOR)	+= omap_nor.o
+ obj-$(CONFIG_MTD_MTX1)		+= mtx-1_flash.o
+ obj-$(CONFIG_MTD_TQM834x)	+= tqm834x.o
++obj-$(CONFIG_MTD_GROCX)		+= grocx.o
++obj-$(CONFIG_MTD_GROCX_SPLIT)		+= grocx_split.o
+Only in linux-2.6.23.9-grocx/drivers/mtd/maps: grocx.c
+diff -ur -x CVS linux-2.6.23.9/drivers/net/Kconfig linux-2.6.23.9-grocx/drivers/net/Kconfig
+--- linux-2.6.23.9/drivers/net/Kconfig	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/net/Kconfig	2007-12-04 04:24:54.000000000 +0100
+@@ -1981,6 +1981,8 @@
+ 
+ if NETDEV_1000
+ 
++source "drivers/net/grocx_shnat/Kconfig"
++
+ config ACENIC
+ 	tristate "Alteon AceNIC/3Com 3C985/NetGear GA620 Gigabit support"
+ 	depends on PCI
+diff -ur -x CVS linux-2.6.23.9/drivers/net/Makefile linux-2.6.23.9-grocx/drivers/net/Makefile
+--- linux-2.6.23.9/drivers/net/Makefile	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/net/Makefile	2007-12-04 04:24:54.000000000 +0100
+@@ -2,6 +2,9 @@
+ # Makefile for the Linux network (ethercard) device drivers.
+ #
+ 
++ifeq ($(CONFIG_ARCH_GROCX),y)
++  obj-$(CONFIG_STAR_SHNAT) += grocx_shnat/
++endif
+ obj-$(CONFIG_E1000) += e1000/
+ obj-$(CONFIG_IBM_EMAC) += ibm_emac/
+ obj-$(CONFIG_IXGB) += ixgb/
+diff -ur -x CVS linux-2.6.23.9/drivers/net/e1000/e1000_main.c linux-2.6.23.9-grocx/drivers/net/e1000/e1000_main.c
+--- linux-2.6.23.9/drivers/net/e1000/e1000_main.c	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/net/e1000/e1000_main.c	2007-12-04 04:24:54.000000000 +0100
+@@ -919,7 +919,12 @@
+ 		if (pci_resource_len(pdev, i) == 0)
+ 			continue;
+ 		if (pci_resource_flags(pdev, i) & IORESOURCE_IO) {
+-			adapter->hw.io_base = pci_resource_start(pdev, i);
++#if defined(CONFIG_ARCH_GROCX)
++                        adapter->hw.io_base = (unsigned long)ioremap(pci_resource_start(pdev, i),
++								     pci_resource_len(pdev, i));
++#else
++                        adapter->hw.io_base = pci_resource_start(pdev, i);
++#endif
+ 			break;
+ 		}
+ 	}
+Only in linux-2.6.23.9-grocx/drivers/net: grocx
+diff -ur -x CVS linux-2.6.23.9/drivers/pci/setup-bus.c linux-2.6.23.9-grocx/drivers/pci/setup-bus.c
+--- linux-2.6.23.9/drivers/pci/setup-bus.c	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/pci/setup-bus.c	2007-12-04 04:24:54.000000000 +0100
+@@ -45,6 +45,21 @@
+ 	list_for_each_entry(dev, &bus->devices, bus_list) {
+ 		u16 class = dev->class >> 8;
+ 
++#if defined(CONFIG_ARCH_GROCX)
++		{
++			u16 cmd;
++
++			pci_read_config_word(dev, PCI_COMMAND, &cmd);
++			cmd |= (PCI_COMMAND_PARITY | PCI_COMMAND_SERR);
++			pci_write_config_word(dev, PCI_COMMAND, cmd);
++			pci_write_config_byte(dev, PCI_CACHE_LINE_SIZE, 0x10); //configure cache line size
++			pci_write_config_byte(dev, PCI_LATENCY_TIMER, 0x80); //configure latency timer
++		}
++
++		if (dev->vendor == 0xeeee)
++			continue;
++#endif
++
+ 		/* Don't touch classless devices or host bridges or ioapics.  */
+ 		if (class == PCI_CLASS_NOT_DEFINED ||
+ 		    class == PCI_CLASS_BRIDGE_HOST)
+diff -ur -x CVS linux-2.6.23.9/drivers/serial/8250.c linux-2.6.23.9-grocx/drivers/serial/8250.c
+--- linux-2.6.23.9/drivers/serial/8250.c	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/serial/8250.c	2007-12-04 04:24:54.000000000 +0100
+@@ -524,6 +524,7 @@
+ 	serial_out(up, UART_ICR, value);
+ }
+ 
++#if !defined(CONFIG_ARCH_GROCX)
+ static unsigned int serial_icr_read(struct uart_8250_port *up, int offset)
+ {
+ 	unsigned int value;
+@@ -535,6 +536,7 @@
+ 
+ 	return value;
+ }
++#endif
+ 
+ /*
+  * FIFO support.
+@@ -640,6 +642,13 @@
+ }
+ #endif /* CONFIG_SERIAL_8250_RSA */
+ 
++#if defined(CONFIG_ARCH_GROCX)
++static void autoconfig(struct uart_8250_port *up, unsigned int probeflags)
++{
++	up->port.type = PORT_16550A;
++	return;
++}
++#else
+ /*
+  * This is a quickie test to see how big the FIFO is.
+  * It doesn't work at all the time, more's the pity.
+@@ -1161,6 +1170,7 @@
+ 	spin_unlock_irqrestore(&up->port.lock, flags);
+ 	DEBUG_AUTOCONF("type=%s\n", uart_config[up->port.type].name);
+ }
++#endif // CONFIG_ARCH_GROCX
+ 
+ static void autoconfig_irq(struct uart_8250_port *up)
+ {
+@@ -1880,6 +1890,7 @@
+ 
+ 	serial8250_set_mctrl(&up->port, up->port.mctrl);
+ 
++#if !defined(CONFIG_ARCH_GROCX)
+ 	/*
+ 	 * Do a quick test to see if we receive an
+ 	 * interrupt when we enable the TX irq.
+@@ -1898,6 +1909,7 @@
+ 	} else {
+ 		up->bugs &= ~UART_BUG_TXEN;
+ 	}
++#endif
+ 
+ 	spin_unlock_irqrestore(&up->port.lock, flags);
+ 
+@@ -2519,7 +2531,11 @@
+ static int __init serial8250_console_setup(struct console *co, char *options)
+ {
+ 	struct uart_port *port;
++#if defined(CONFIG_ARCH_GROCX)
++	int baud = CONFIG_CONSOLE_BAUD_RATE;
++#else
+ 	int baud = 9600;
++#endif
+ 	int bits = 8;
+ 	int parity = 'n';
+ 	int flow = 'n';
+diff -ur -x CVS linux-2.6.23.9/drivers/serial/Makefile linux-2.6.23.9-grocx/drivers/serial/Makefile
+--- linux-2.6.23.9/drivers/serial/Makefile	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/serial/Makefile	2007-12-04 04:24:54.000000000 +0100
+@@ -9,7 +9,9 @@
+ obj-$(CONFIG_SERIAL_8250) += 8250.o
+ obj-$(CONFIG_SERIAL_8250_PNP) += 8250_pnp.o
+ obj-$(CONFIG_SERIAL_8250_GSC) += 8250_gsc.o
+-obj-$(CONFIG_SERIAL_8250_PCI) += 8250_pci.o
++ifndef CONFIG_ARCH_GROCX
++  obj-$(CONFIG_SERIAL_8250_PCI) += 8250_pci.o
++endif
+ obj-$(CONFIG_SERIAL_8250_HP300) += 8250_hp300.o
+ obj-$(CONFIG_SERIAL_8250_CS) += serial_cs.o
+ obj-$(CONFIG_SERIAL_8250_ACORN) += 8250_acorn.o
+diff -ur -x CVS linux-2.6.23.9/drivers/spi/Kconfig linux-2.6.23.9-grocx/drivers/spi/Kconfig
+--- linux-2.6.23.9/drivers/spi/Kconfig	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/spi/Kconfig	2007-12-04 04:24:54.000000000 +0100
+@@ -194,6 +194,13 @@
+ # Add new SPI master controllers in alphabetical order above this line
+ #
+ 
++config SPI_GROCX
++	tristate "GROCX SPI master"
++	depends on SPI_MASTER && EXPERIMENTAL
++	select SPI_BITBANG
++	help
++	  GROCX SPI master support
++
+ #
+ # There are lots of SPI device types, with sensors and memory
+ # being probably the most widely used ones.
+diff -ur -x CVS linux-2.6.23.9/drivers/spi/Makefile linux-2.6.23.9-grocx/drivers/spi/Makefile
+--- linux-2.6.23.9/drivers/spi/Makefile	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/spi/Makefile	2007-12-04 04:24:54.000000000 +0100
+@@ -24,6 +24,7 @@
+ obj-$(CONFIG_SPI_OMAP24XX)		+= omap2_mcspi.o
+ obj-$(CONFIG_SPI_MPC52xx_PSC)		+= mpc52xx_psc_spi.o
+ obj-$(CONFIG_SPI_MPC83xx)		+= spi_mpc83xx.o
++obj-$(CONFIG_SPI_GROCX) 		+= spi_grocx.o
+ obj-$(CONFIG_SPI_S3C24XX_GPIO)		+= spi_s3c24xx_gpio.o
+ obj-$(CONFIG_SPI_S3C24XX)		+= spi_s3c24xx.o
+ obj-$(CONFIG_SPI_TXX9)			+= spi_txx9.o
+diff -ur -x CVS linux-2.6.23.9/drivers/spi/spi_bitbang.c linux-2.6.23.9-grocx/drivers/spi/spi_bitbang.c
+--- linux-2.6.23.9/drivers/spi/spi_bitbang.c	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/spi/spi_bitbang.c	2007-12-04 04:24:54.000000000 +0100
+@@ -341,6 +341,13 @@
+ 				 */
+ 				if (!m->is_dma_mapped)
+ 					t->rx_dma = t->tx_dma = 0;
++#ifdef CONFIG_ARCH_GROCX
++				if (t->transfer_list.next == &m->transfers) {
++					t->last_in_message_list = 1;
++				} else {
++					t->last_in_message_list = 0;
++				}
++#endif
+ 				status = bitbang->txrx_bufs(spi, t);
+ 			}
+ 			if (status != t->len) {
+Only in linux-2.6.23.9-grocx/drivers/spi: spi_grocx.c
+diff -ur -x CVS linux-2.6.23.9/drivers/usb/core/buffer.c linux-2.6.23.9-grocx/drivers/usb/core/buffer.c
+--- linux-2.6.23.9/drivers/usb/core/buffer.c	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/usb/core/buffer.c	2007-12-04 04:24:54.000000000 +0100
+@@ -54,8 +54,10 @@
+ 	char		name[16];
+ 	int 		i, size;
+ 
++#if !defined(CONFIG_ARCH_GROCX)
+ 	if (!hcd->self.controller->dma_mask)
+ 		return 0;
++#endif
+ 
+ 	for (i = 0; i < HCD_BUFFER_POOLS; i++) { 
+ 		if (!(size = pool_max [i]))
+diff -ur -x CVS linux-2.6.23.9/drivers/usb/core/urb.c linux-2.6.23.9-grocx/drivers/usb/core/urb.c
+--- linux-2.6.23.9/drivers/usb/core/urb.c	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/usb/core/urb.c	2007-12-04 04:24:54.000000000 +0100
+@@ -287,9 +287,11 @@
+ 	    (dev->state < USB_STATE_DEFAULT) ||
+ 	    (!dev->bus) || (dev->devnum <= 0))
+ 		return -ENODEV;
++#if !defined(CONFIG_ARCH_GROCX)
+ 	if (dev->bus->controller->power.power_state.event != PM_EVENT_ON
+ 			|| dev->state == USB_STATE_SUSPENDED)
+ 		return -EHOSTUNREACH;
++#endif
+ 
+ 	urb->status = -EINPROGRESS;
+ 	urb->actual_length = 0;
+Only in linux-2.6.23.9-grocx/drivers/usb/host: ehci-grocx.c
+diff -ur -x CVS linux-2.6.23.9/drivers/usb/host/ehci-hcd.c linux-2.6.23.9-grocx/drivers/usb/host/ehci-hcd.c
+--- linux-2.6.23.9/drivers/usb/host/ehci-hcd.c	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/drivers/usb/host/ehci-hcd.c	2007-12-04 04:24:54.000000000 +0100
+@@ -937,6 +937,11 @@
+ #define	PCI_DRIVER		ehci_pci_driver
+ #endif
+ 
++#ifdef CONFIG_ARCH_GROCX
++#include "ehci-grocx.c"
++#define	PCI_DRIVER		ehci_pci_driver
++#endif
++
+ #ifdef CONFIG_USB_EHCI_FSL
+ #include "ehci-fsl.c"
+ #define	PLATFORM_DRIVER		ehci_fsl_driver

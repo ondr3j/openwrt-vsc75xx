@@ -1,0 +1,59 @@
+--- linux-2.6.23.17/net/ipv6/netfilter/nf_conntrack_reasm.c-orig	2008-02-26 08:14:28.000000000 +0800
++++ linux-2.6.23.17/net/ipv6/netfilter/nf_conntrack_reasm.c	2012-01-31 09:49:10.000000000 +0800
+@@ -27,10 +27,12 @@
+ #include <linux/ipv6.h>
+ #include <linux/icmpv6.h>
+ #include <linux/random.h>
++#include <linux/ipv6_route.h>
+ #include <linux/jhash.h>
+ 
+ #include <net/sock.h>
+ #include <net/snmp.h>
++#include <net/ip6_route.h>
+ 
+ #include <net/ipv6.h>
+ #include <net/protocol.h>
+@@ -286,7 +288,18 @@
+ 		goto out;
+ 
+ 	fq_kill(fq);
++	
++	/* Don't send error if the first segment did not arrive. */
++	if (!(fq->last_in&FIRST_IN) || !fq->fragments)
++		goto out;
++
++	/*
++	 * Only an end host needs to send an ICMP "Fragment Reassembly
++	 * Timeout" message, per section 4.5 of RFC2460.
++	*/
+ 
++	/* Send an ICMP "Fragment Reassembly Timeout" message. */
++	icmpv6_send(fq->fragments, ICMPV6_TIME_EXCEED, ICMPV6_EXC_FRAGTIME, 0, fq->fragments->dev);
+ out:
+ 	spin_unlock(&fq->lock);
+ 	fq_put(fq, NULL);
+@@ -534,18 +547,22 @@
+ 	else
+ 		fq->fragments = skb;
+ 
+-	skb->dev = NULL;
++	//skb->dev = NULL;
+ 	fq->stamp = skb->tstamp;
+ 	fq->meat += skb->len;
+ 	atomic_add(skb->truesize, &nf_ct_frag6_mem);
+ 
+ 	/* The first fragment.
+ 	 * nhoffset is obtained from the first fragment, of course.
++	 * Reserve dev for sending an ICMP "Fragment Reassembly Timeout"
++	 * message.
+ 	 */
+ 	if (offset == 0) {
+ 		fq->nhoffset = nhoff;
+ 		fq->last_in |= FIRST_IN;
+-	}
++	} else {
++		skb->dev = NULL;
++ 	}
+ 	write_lock(&nf_ct_frag6_lock);
+ 	list_move_tail(&fq->lru_list, &nf_ct_frag6_lru_list);
+ 	write_unlock(&nf_ct_frag6_lock);

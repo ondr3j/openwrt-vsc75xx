@@ -1,0 +1,27 @@
+diff -urN linux-2.6.23.9-orig/net/netfilter/Kconfig linux-2.6.23.9/net/netfilter/Kconfig
+--- linux-2.6.23.9-orig/net/netfilter/Kconfig	2009-11-25 15:40:53.000000000 +0800
++++ linux-2.6.23.9/net/netfilter/Kconfig	2010-01-18 19:27:46.000000000 +0800
+@@ -492,6 +492,15 @@
+ 	  This match allows you to match against the tx/rx rate
+ 	  per client IP address (or address block).
+ 
++config NETFILTER_XT_MATCH_WEBSTR
++	tristate  '"webstr" match support'
++	depends on NETFILTER_XTABLES
++	help
++	  This option adds a `webstr' match, which allows you to look for
++	  pattern matchings in http stream.
++
++	  To compile it as a module, choose M here.  If unsure, say N.
++	  
+ config NETFILTER_XT_MATCH_CONNMARK
+ 	tristate  '"connmark" connection mark match support'
+ 	depends on NETFILTER_XTABLES
+diff -urN linux-2.6.23.9-orig/net/netfilter/Makefile linux-2.6.23.9/net/netfilter/Makefile
+--- linux-2.6.23.9-orig/net/netfilter/Makefile	2009-11-25 15:40:53.000000000 +0800
++++ linux-2.6.23.9/net/netfilter/Makefile	2010-01-18 19:33:50.000000000 +0800
+@@ -84,3 +84,4 @@
+ obj-$(CONFIG_NETFILTER_XT_MATCH_U32) += xt_u32.o
+ obj-$(CONFIG_NETFILTER_XT_MATCH_HASHLIMIT) += xt_hashlimit.o
+ obj-$(CONFIG_NETFILTER_XT_MATCH_PORTSCAN) += xt_portscan.o
++obj-$(CONFIG_NETFILTER_XT_MATCH_WEBSTR) += xt_webstr.o

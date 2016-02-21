@@ -1,0 +1,473 @@
+--- linux-2.6.23.17/net/netfilter/nf_conntrack_proto_tcp.c-orig	2012-02-23 10:21:07.000000000 +0800
++++ linux-2.6.23.17/net/netfilter/nf_conntrack_proto_tcp.c	2012-02-23 09:19:49.000000000 +0800
+@@ -29,6 +29,9 @@
+ #include <asm/arch/star_shnat_hook.h>
+ #endif
+ 
++#define _USRLOG          1 << 2
++extern unsigned long draytek_syslog_flag;
++
+ /* Draytek : rate limit */
+ int (*check_rate_limit_range_proto)(u_int32_t addr1, u_int32_t addr2) = NULL;
+ int (*rate_limit_enabled_proto)(void) = NULL;
+@@ -846,7 +849,7 @@
+ 
+ 	return NF_ACCEPT;
+ }
+-void (*syslog_user_access_log)(unsigned long src_addr,unsigned long dest_addr,unsigned char *mac_addr,unsigned short dst_port,int pkt_proto,unsigned short src_port)=NULL;
++void (*syslog_user_access_log)(unsigned char *src_addr,unsigned char *dest_addr,unsigned char *mac_addr,unsigned short dst_port,int pkt_proto,unsigned short src_port, unsigned short ip_proto)=NULL;
+ EXPORT_SYMBOL_GPL(syslog_user_access_log);
+ /* Returns verdict for packet, or -1 for invalid. */
+ static int tcp_packet(struct nf_conn *conntrack,
+@@ -1052,13 +1055,21 @@
+ 			}
+ 		}
+ #endif
+-		if(syslog_user_access_log){/* Draytek :syslog utility user access log */
+-			struct ethhdr *eth_header = (struct ethhdr *)skb->mac_header;
+- 			if(eth_header!=NULL){
+-				if (CTINFO2DIR(ctinfo) == IP_CT_DIR_ORIGINAL) {//Only LAN -> WAN
+-					syslog_user_access_log(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip,conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip,eth_header->h_source,ntohs(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.tcp.port),1,ntohs(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.tcp.port));
++		if(syslog_user_access_log && (draytek_syslog_flag & _USRLOG)){/* Draytek :syslog utility user access log */
++			if (skb!=NULL){
++				if (skb->dev && skb->dev->hard_header_len
++                    && skb->mac_header != skb->network_header){
++					struct iphdr *iph;
++					if(eth_hdr(skb)!=NULL){
++						iph = ip_hdr(skb);
++						if(iph->version == 6 || iph->version == 4){
++							if (CTINFO2DIR(ctinfo) == IP_CT_DIR_ORIGINAL) {//Only LAN -> WAN
++								syslog_user_access_log(&conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip6,&conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip6,eth_hdr(skb)->h_source,ntohs(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.tcp.port),1,ntohs(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.tcp.port),(unsigned short)(iph->version));
++							}
++						}
++					}
+ 				}
+-			}                
++			}			
+ 		}
+ 	}
+ 	nf_ct_refresh_acct(conntrack, ctinfo, skb, timeout);
+--- linux-2.6.23.17/net/netfilter/nf_conntrack_proto_udp.c-orig	2012-02-23 10:21:06.000000000 +0800
++++ linux-2.6.23.17/net/netfilter/nf_conntrack_proto_udp.c	2012-02-23 10:37:31.000000000 +0800
+@@ -26,6 +26,11 @@
+ #include <asm/arch/star_shnat_hook.h>
+ #endif
+ 
++void dbg_mem_dump(unsigned char *, int);
++
++#define _USRLOG          1 << 2
++extern unsigned long draytek_syslog_flag;
++
+ /* Draytek : rate limit */
+ extern int is_ratelimit_enabled(void);
+ extern int check_ratelimit_range(unsigned long addr1, unsigned long addr2);
+@@ -73,7 +78,7 @@
+ {
+ 	return 0;
+ }
+-extern void (*syslog_user_access_log)(unsigned long src_addr,unsigned long dest_addr,unsigned char *mac_addr,unsigned short dst_port,int pkt_proto,unsigned short src_port);
++extern void (*syslog_user_access_log)(unsigned char *src_addr,unsigned char *dest_addr,unsigned char *mac_addr,unsigned short dst_port,int pkt_proto,unsigned short src_port, unsigned short ip_proto);
+ /* Returns verdict for packet, and may modify conntracktype */
+ static int udp_packet(struct nf_conn *conntrack,
+ 		      const struct sk_buff *skb,
+@@ -110,12 +115,20 @@
+ 		    }
+ 			#endif
+ 			/* Draytek :syslog utility user access log */
+-			if(syslog_user_access_log){
+-				struct ethhdr *eth_header = (struct ethhdr *)skb->mac_header;
+-				if(eth_header!=NULL){
+-					if (CTINFO2DIR(ctinfo) == IP_CT_DIR_ORIGINAL) {//Only LAN -> WAN
+-						syslog_user_access_log(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip,conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip,eth_header->h_source,ntohs(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.udp.port),2,ntohs(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.udp.port));
+-					}                        
++			if(syslog_user_access_log && (draytek_syslog_flag & _USRLOG)){
++				if (skb!=NULL){
++					if (skb->dev && skb->dev->hard_header_len
++                    	&& (skb->network_header - skb->mac_header) == 14){
++						struct iphdr *iph;
++						if(eth_hdr(skb)!=NULL){
++							iph = ip_hdr(skb);
++							if(iph->version == 6 || iph->version == 4){
++								if (CTINFO2DIR(ctinfo) == IP_CT_DIR_ORIGINAL) {//Only LAN -> WAN
++									syslog_user_access_log(&conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip6,&conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip6,eth_hdr(skb)->h_source,ntohs(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.udp.port),2,ntohs(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.udp.port),(unsigned short)(iph->version));
++								}
++							}
++						}
++					}
+ 				}
+ 			}
+ 	    }
+--- linux-2.6.23.17/net/ipv4/netfilter/nf_conntrack_proto_icmp.c-orig	2012-02-23 10:21:06.000000000 +0800
++++ linux-2.6.23.17/net/ipv4/netfilter/nf_conntrack_proto_icmp.c	2012-02-23 09:20:10.000000000 +0800
+@@ -19,6 +19,9 @@
+ #include <net/netfilter/nf_conntrack_l4proto.h>
+ #include <net/netfilter/nf_conntrack_core.h>
+ 
++#define _USRLOG          1 << 2
++extern unsigned long draytek_syslog_flag;
++
+ static unsigned long nf_ct_icmp_timeout __read_mostly = 30*HZ;
+ 
+ static int icmp_pkt_to_tuple(const struct sk_buff *skb,
+@@ -80,7 +83,7 @@
+ 	return 0;
+ }
+ 
+-extern void (*syslog_user_access_log)(unsigned long src_addr,unsigned long dest_addr,unsigned char *mac_addr,unsigned short dst_port,int pkt_proto,unsigned short src_port);
++extern void (*syslog_user_access_log)(unsigned char *src_addr,unsigned char *dest_addr,unsigned char *mac_addr,unsigned short dst_port,int pkt_proto,unsigned short src_port, unsigned short ip_proto);
+ /* Returns verdict for packet, or -1 for invalid. */
+ static int icmp_packet(struct nf_conn *ct,
+ 		       const struct sk_buff *skb,
+@@ -98,11 +101,19 @@
+ 		    && del_timer(&ct->timeout))
+ 			ct->timeout.function((unsigned long)ct);
+ 	} else {
+-        if(syslog_user_access_log){/* Draytek :syslog utility user access log */
+-            struct ethhdr *eth_header = (struct ethhdr *)skb->mac_header;
+-            if(eth_header!=NULL)
+-                syslog_user_access_log(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip,ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip,eth_header->h_source,ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.icmp.type,3,ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.icmp.id);
+-        }
++        if(syslog_user_access_log && (draytek_syslog_flag & _USRLOG)){/* Draytek :syslog utility user access log */
++            if (skb!=NULL){
++				if (skb->dev && skb->dev->hard_header_len
++                	&& skb->mac_header != skb->network_header){
++					struct iphdr *iph;
++					if(eth_hdr(skb)!=NULL){
++						iph = ip_hdr(skb);
++						if(iph->version == 6 || iph->version == 4)
++							syslog_user_access_log(&ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip6,&ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip6,eth_hdr(skb)->h_source,ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.icmp.type,3,ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u.icmp.id,(unsigned short)(iph->version));
++					}
++				}
++            }
++		}
+         atomic_inc(&ct->proto.icmp.count);
+ 		nf_conntrack_event_cache(IPCT_PROTOINFO_VOLATILE, skb);
+ 		nf_ct_refresh_acct(ct, ctinfo, skb, nf_ct_icmp_timeout);
+--- linux-2.6.23.17/lib/vsprintf.c-orig	2008-02-26 08:14:28.000000000 +0800
++++ linux-2.6.23.17/lib/vsprintf.c	2012-02-17 18:58:21.000000000 +0800
+@@ -22,10 +22,16 @@
+ #include <linux/string.h>
+ #include <linux/ctype.h>
+ #include <linux/kernel.h>
++#include <linux/ioport.h>
++#include <linux/in6.h>
+ 
+ #include <asm/page.h>		/* for PAGE_SIZE */
+ #include <asm/div64.h>
+ 
++static const char hex_asc[] = "0123456789abcdef";
++static const char hexchars[]="0123456789abcdef";
++#define hex_asc_lo(x)   hex_asc[((x) & 0x0f)]
++
+ /**
+  * simple_strtoul - convert a string to an unsigned long
+  * @cp: The start of the string
+@@ -238,7 +244,9 @@
+ #define SPACE	8		/* space if plus */
+ #define LEFT	16		/* left justified */
+ #define SPECIAL	32		/* 0x */
++#define SMALL	32		/* Must be 32 == 0x20 */
+ #define LARGE	64		/* use 'ABCDEF' instead of 'abcdef' */
++#define SPECIAL_NEW	 64		/* 0x */
+ 
+ static char *number(char *buf, char *end, unsigned long long num, int base, int size, int precision, int type)
+ {
+@@ -355,6 +363,283 @@
+ 	return buf;
+ }
+ 
++static char *string(char *buf, char *end, char *s, int field_width, int precision, int flags)
++{
++	int len, i;
++
++	if ((unsigned long)s < PAGE_SIZE)
++		s = "<NULL>";
++
++	len = strnlen(s, precision);
++
++	if (!(flags & LEFT)) {
++		while (len < field_width--) {
++			if (buf < end)
++				*buf = ' ';
++			++buf;
++		}
++	}
++	for (i = 0; i < len; ++i) {
++		if (buf < end)
++			*buf = *s;
++		++buf; ++s;
++	}
++	while (len < field_width--) {
++		if (buf < end)
++			*buf = ' ';
++		++buf;
++	}
++	return buf;
++}
++
++static char *symbol_string(char *buf, char *end, void *ptr, int field_width, int precision, int flags)
++{
++	unsigned long value = (unsigned long) ptr;
++#ifdef CONFIG_KALLSYMS
++	char sym[KSYM_SYMBOL_LEN];
++	sprint_symbol(sym, value);
++	return string(buf, end, sym, field_width, precision, flags);
++#else
++	field_width = 2*sizeof(void *);
++	flags |= SPECIAL_NEW | SMALL | ZEROPAD;
++	return number(buf, end, value, 16, field_width, precision, flags);
++#endif
++}
++
++static char *resource_string(char *buf, char *end, struct resource *res, int field_width, int precision, int flags)
++{
++#ifndef IO_RSRC_PRINTK_SIZE
++#define IO_RSRC_PRINTK_SIZE	4
++#endif
++
++#ifndef MEM_RSRC_PRINTK_SIZE
++#define MEM_RSRC_PRINTK_SIZE	8
++#endif
++
++	/* room for the actual numbers, the two "0x", -, [, ] and the final zero */
++	char sym[4*sizeof(resource_size_t) + 8];
++	char *p = sym, *pend = sym + sizeof(sym);
++	int size = -1;
++
++	if (res->flags & IORESOURCE_IO)
++		size = IO_RSRC_PRINTK_SIZE;
++	else if (res->flags & IORESOURCE_MEM)
++		size = MEM_RSRC_PRINTK_SIZE;
++
++	*p++ = '[';
++	p = number(p, pend, res->start, 16, size, -1, SPECIAL_NEW | SMALL | ZEROPAD);
++	*p++ = '-';
++	p = number(p, pend, res->end, 16, size, -1, SPECIAL_NEW | SMALL | ZEROPAD);
++	*p++ = ']';
++	*p = 0;
++
++	return string(buf, end, sym, field_width, precision, flags);
++}
++
++/* Pack a hex byte */
++static char *pack_hex_byte(char *pkt, int byte)
++{
++	*pkt++ = hexchars[(byte >> 4) & 0xf];
++	*pkt++ = hexchars[(byte & 0xf)];
++	return pkt;
++}
++
++static char *mac_address_string(char *buf, char *end, u8 *addr, int field_width,
++				int precision, int flags)
++{
++	char mac_addr[6 * 3]; /* (6 * 2 hex digits), 5 colons and trailing zero */
++	char *p = mac_addr;
++	int i;
++
++	for (i = 0; i < 6; i++) {
++		p = pack_hex_byte(p, addr[i]);
++		if (!(flags & SPECIAL_NEW) && i != 5)
++			*p++ = ':';
++	}
++	*p = '\0';
++
++	return string(buf, end, mac_addr, field_width, precision, flags & ~SPECIAL);
++}
++
++char *ip6_compressed_string(char *p, const char *addr)
++{
++	int i, j, range;
++	unsigned char zerolength[8];
++	int longest = 1;
++	int colonpos = -1;
++	u16 word;
++	u8 hi, lo;
++	bool needcolon = false;
++	bool useIPv4;
++	struct in6_addr in6;
++
++	memcpy(&in6, addr, sizeof(struct in6_addr));
++
++	//useIPv4 = ipv6_addr_v4mapped(&in6) || ipv6_addr_is_isatap(&in6);
++
++	memset(zerolength, 0, sizeof(zerolength));
++
++	//if (useIPv4)
++	//	range = 6;
++	//else
++		range = 8;
++
++	/* find position of longest 0 run */
++	for (i = 0; i < range; i++) {
++		for (j = i; j < range; j++) {
++			if (in6.s6_addr16[j] != 0)
++				break;
++			zerolength[i]++;
++		}
++	}
++	for (i = 0; i < range; i++) {
++		if (zerolength[i] > longest) {
++			longest = zerolength[i];
++			colonpos = i;
++		}
++	}
++
++	/* emit address */
++	for (i = 0; i < range; i++) {
++		if (i == colonpos) {
++			if (needcolon || i == 0)
++				*p++ = ':';
++			*p++ = ':';
++			needcolon = false;
++			i += longest - 1;
++			continue;
++		}
++		if (needcolon) {
++			*p++ = ':';
++			needcolon = false;
++		}
++		/* hex u16 without leading 0s */
++		word = ntohs(in6.s6_addr16[i]);
++		hi = word >> 8;
++		lo = word & 0xff;
++		if (hi) {
++			if (hi > 0x0f)
++				p = pack_hex_byte(p, hi);
++			else
++				*p++ = hex_asc_lo(hi);
++			p = pack_hex_byte(p, lo);
++		}
++		else if (lo > 0x0f)
++			p = pack_hex_byte(p, lo);
++		else
++			*p++ = hex_asc_lo(lo);
++		needcolon = true;
++	}
++
++	/*if (useIPv4) {
++		if (needcolon)
++			*p++ = ':';
++		p = ip4_string(p, &in6.s6_addr[12], "I4");
++	}*/
++	*p = '\0';
++
++	return p;
++}
++
++static char *ip6_addr_string(char *buf, char *end, u8 *addr, int field_width,
++			 int precision, int flags)
++{
++	char ip6_addr[8 * 5]; /* (8 * 4 hex digits), 7 colons and trailing zero */
++	/*char *p = ip6_addr;
++	int i;
++
++	for (i = 0; i < 8; i++) {
++		p = pack_hex_byte(p, addr[2 * i]);
++		p = pack_hex_byte(p, addr[2 * i + 1]);
++		if (!(flags & SPECIAL_NEW) && i != 7)
++			*p++ = ':';
++	}
++	*p = '\0';*/
++	ip6_compressed_string(ip6_addr, addr);
++
++	return string(buf, end, ip6_addr, field_width, precision, flags & ~SPECIAL);
++}
++
++static char *ip4_addr_string(char *buf, char *end, u8 *addr, int field_width,
++			 int precision, int flags)
++{
++	char ip4_addr[4 * 4]; /* (4 * 3 decimal digits), 3 dots and trailing zero */
++	char temp[3];	/* hold each IP quad in reverse order */
++	char *p = ip4_addr;
++	int i, digits;
++
++	for (i = 0; i < 4; i++) {
++		digits = put_dec_trunc(temp, addr[i]) - temp;
++		/* reverse the digits in the quad */
++		while (digits--)
++			*p++ = temp[digits];
++		if (i != 3)
++			*p++ = '.';
++	}
++	*p = '\0';
++
++	return string(buf, end, ip4_addr, field_width, precision, flags & ~SPECIAL_NEW);
++}
++
++/*
++ * Show a '%p' thing.  A kernel extension is that the '%p' is followed
++ * by an extra set of alphanumeric characters that are extended format
++ * specifiers.
++ *
++ * Right now we handle:
++ *
++ * - 'F' For symbolic function descriptor pointers
++ * - 'S' For symbolic direct pointers
++ * - 'R' For a struct resource pointer, it prints the range of
++ *       addresses (not the name nor the flags)
++ * - 'M' For a 6-byte MAC address, it prints the address in the
++ *       usual colon-separated hex notation
++ * - 'I' [46] for IPv4/IPv6 addresses printed in the usual way (dot-separated
++ *       decimal for v4 and colon separated network-order 16 bit hex for v6)
++ * - 'i' [46] for 'raw' IPv4/IPv6 addresses, IPv6 omits the colons, IPv4 is
++ *       currently the same
++ *
++ * Note: The difference between 'S' and 'F' is that on ia64 and ppc64
++ * function pointers are really function descriptors, which contain a
++ * pointer to the real address.
++ */
++static char *pointer(const char *fmt, char *buf, char *end, void *ptr, int field_width, int precision, int flags)
++{
++	if (!ptr)
++		return string(buf, end, "(null)", field_width, precision, flags);
++
++	switch (*fmt) {
++	/*case 'F':
++		ptr = dereference_function_descriptor(ptr);
++		/* Fallthrough */
++	case 'S':
++		return symbol_string(buf, end, ptr, field_width, precision, flags);
++	case 'R':
++		return resource_string(buf, end, ptr, field_width, precision, flags);
++	case 'm':
++		flags |= SPECIAL_NEW;
++		/* Fallthrough */
++	case 'M':
++		return mac_address_string(buf, end, ptr, field_width, precision, flags);
++	case 'i':
++		flags |= SPECIAL_NEW;
++		/* Fallthrough */
++	case 'I':
++		if (fmt[1] == '6')
++			return ip6_addr_string(buf, end, ptr, field_width, precision, flags);
++		if (fmt[1] == '4')
++			return ip4_addr_string(buf, end, ptr, field_width, precision, flags);
++		flags &= ~SPECIAL_NEW;
++		break;
++	}
++	flags |= SMALL;
++	if (field_width == -1) {
++		field_width = 2*sizeof(void *);
++		flags |= ZEROPAD;
++	}
++	return number(buf, end, (unsigned long) ptr, 16, field_width, precision, flags);
++}
++
+ /**
+  * vsnprintf - Format a string and place it in a buffer
+  * @buf: The buffer to place the result into
+@@ -530,6 +815,14 @@
+ 						16, field_width, precision, flags);
+ 				continue;
+ 
++			case 'P':
++				str = pointer(fmt+1, str, end,
++						va_arg(args, void *),
++						field_width, precision, flags);
++				/* Skip all alphanumeric pointer suffixes */
++				while (isalnum(fmt[1]))
++					fmt++;
++				continue;			
+ 
+ 			case 'n':
+ 				/* FIXME:

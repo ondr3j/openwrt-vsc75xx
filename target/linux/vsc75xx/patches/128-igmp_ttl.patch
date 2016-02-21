@@ -1,0 +1,29 @@
+diff -urN linux-2.6.23.9-orig/net/ipv4/ipmr.c linux-2.6.23.9/net/ipv4/ipmr.c
+--- linux-2.6.23.9-orig/net/ipv4/ipmr.c	2010-05-28 16:40:12.000000000 +0800
++++ linux-2.6.23.9/net/ipv4/ipmr.c	2010-05-28 16:37:46.000000000 +0800
+@@ -1215,7 +1215,7 @@
+ 
+ 	dst_release(skb->dst);
+ 	skb->dst = &rt->u.dst;
+-	ip_decrease_ttl(ip_hdr(skb));
++	//ip_decrease_ttl(ip_hdr(skb)); //forward igmp with ttl=1
+ 
+ 	/* FIXME: forward and output firewalls used to be called here.
+ 	 * What do we do with netfilter? -- RR */
+@@ -1315,14 +1315,14 @@
+ 	 *	Forward the frame
+ 	 */
+ 	for (ct = cache->mfc_un.res.maxvif-1; ct >= cache->mfc_un.res.minvif; ct--) {
+-		if (ip_hdr(skb)->ttl > cache->mfc_un.res.ttls[ct]) {
++		//if (ip_hdr(skb)->ttl > cache->mfc_un.res.ttls[ct]) { // forward igmp with ttl=1
+ 			if (psend != -1) {
+ 				struct sk_buff *skb2 = skb_clone(skb, GFP_ATOMIC);
+ 				if (skb2)
+ 					ipmr_queue_xmit(skb2, cache, psend);
+ 			}
+ 			psend=ct;
+-		}
++		//}
+ 	}
+ 	if (psend != -1) {
+ 		if (local) {

@@ -1,0 +1,34 @@
+--- linux-2.6.23.17/include/net/ipv6.h-orig	2008-02-26 08:14:28.000000000 +0800
++++ linux-2.6.23.17/include/net/ipv6.h	2012-03-08 18:40:44.000000000 +0800
+@@ -377,6 +377,13 @@
+ 		 a->s6_addr32[2] | a->s6_addr32[3] ) == 0); 
+ }
+ 
++static inline int ipv6_addr_loopback(const struct in6_addr *a)
++{
++	return ((a->s6_addr32[0] | a->s6_addr32[1] |
++ 	a->s6_addr32[2] | (a->s6_addr32[3] ^ htonl(1))) == 0);
++}
++
++
+ /*
+  * find the first different bit between two addresses
+  * length of address must be a multiple of 32bits
+--- linux-2.6.23.17/net/ipv6/ip6_input.c-orig	2008-02-26 08:14:28.000000000 +0800
++++ linux-2.6.23.17/net/ipv6/ip6_input.c	2012-03-08 18:43:36.000000000 +0800
+@@ -101,6 +101,15 @@
+ 	if (hdr->version != 6)
+ 		goto err;
+ 
++	/*
++	 * RFC4291 2.5.3
++	 * A packet received on an interface with a destination address
++	 * of loopback must be dropped.
++	 */
++	if (!(dev->flags & IFF_LOOPBACK) &&
++	ipv6_addr_loopback(&hdr->daddr))
++		goto err;
++
+ 	skb->transport_header = skb->network_header + sizeof(*hdr);
+ 	IP6CB(skb)->nhoff = offsetof(struct ipv6hdr, nexthdr);
+ 

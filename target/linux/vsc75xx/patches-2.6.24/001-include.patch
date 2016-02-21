@@ -1,0 +1,30 @@
+diff -ur -x CVS linux-2.6.24.7/include/linux/spi/spi.h linux-2.6.24.7-grocx/include/linux/spi/spi.h
+--- linux-2.6.24.7/include/linux/spi/spi.h	2008-05-07 01:22:34.000000000 +0200
++++ linux-2.6.24.7-grocx/include/linux/spi/spi.h	2008-10-30 20:25:16.000000000 +0100
+@@ -402,6 +402,10 @@
+ 	u16		delay_usecs;
+ 	u32		speed_hz;
+ 
++#ifdef CONFIG_ARCH_GROCX
++	unsigned	last_in_message_list;
++#endif
++
+ 	struct list_head transfer_list;
+ };
+ 
+diff -ur -x CVS linux-2.6.24.7/include/net/netfilter/nf_conntrack.h linux-2.6.24.7-grocx/include/net/netfilter/nf_conntrack.h
+--- linux-2.6.24.7/include/net/netfilter/nf_conntrack.h	2008-05-07 01:22:34.000000000 +0200
++++ linux-2.6.24.7-grocx/include/net/netfilter/nf_conntrack.h	2008-10-30 20:25:16.000000000 +0100
+@@ -129,6 +129,11 @@
+ 
+ 	/* Extensions */
+ 	struct nf_ct_ext *ext;
++#if defined(CONFIG_STAR_SHNAT)
++	u32	star_ready;
++	u32 star_session_hash;
++	u32	star_session_link_hash;	
++#endif
+ };
+ 
+ static inline struct nf_conn *
+Only in linux-2.6.24.7-grocx/include/net/netfilter: nf_conntrack.h.orig

@@ -1,0 +1,96 @@
+#!/bin/sh
+
+#[ "$BUTTON" = "default" ] || exit 0
+
+logger "Button $BUTTON was $ACTION"
+
+case "$BUTTON" in
+		default)
+			case "$ACTION" in
+				pressed)
+							date +%s > /tmp/default_button_time
+							status=$(cat /proc/button/default)
+							[ "$status" == "1" ] && {
+								/etc/led-control.sh default &
+							} 
+					;;
+
+				released)
+							START=$(head -n 1 /tmp/default_button_time)
+							END=$(date +%s)
+							DIFF=$(($END - $START))
+							if [ "$DIFF" -ge "5" ]; then
+								logger "press default button more than 5 seconds --> do factory default...	"
+								rm -rf /tmp/default_button_time
+								rm -rf /jffs/*
+								reboot -d 3 <&- >&- &
+							else
+								rm -rf /tmp/default_button_time
+							fi
+					;;
+			esac
+		;;
+
+		wifi)
+			case "$ACTION" in
+				    pressed)
+				    logger "wifi button was pressed..."
+				    ;;
+				    
+				    released)
+						if [ -f /tmp/wifi_button_time ]; then
+							START=$(head -n 1 /tmp/wifi_button_time)
+							END=$(date +%s)
+							DIFF=$(($END - $START))
+							if [ "$DIFF" -le "20" ]; then
+								logger "wifi button is processing, press again later..."
+								return
+							fi
+						fi
+
+				    # log the released time of wifi button
+				    logger "wifi button was released..."
+					WLANON=$(uci get wireless.ra0.radio)
+					logger "wlan radio: $WLANON --> $((1 - $WLANON))"
+					uci set wireless.ra0.radio=$((1 - $WLANON))
+					uci commit wireless
+					iwpriv ra0 set RadioOn=$((1 - $WLANON))
+					sleep 1
+					if [ "$WLANON" == "1" ]; then	# on -> off
+						echo off > /proc/gpio/LED1
+						echo off > /proc/gpio/LED7
+						echo disable > /proc/gpio/LED1
+					else
+						echo enable > /proc/gpio/LED1
+						echo on > /proc/gpio/LED1
+						ifconfig | grep -q ^ra0 || {
+							date +%s > /tmp/wifi_button_time
+							wifi up
+						}
+					fi
+					return
+				    ;;
+			esac
+		;;
+		
+		wps)
+			case "$ACTION" in
+				    pressed)
+				    logger "wps was pressed..."
+					radio=$(uci get wireless.ra0.radio)
+					if [ $radio == "0" ]; then
+						return
+					fi
+					wps=$(uci get wireless.@wifi-iface[0].encryption)
+					if [ $wps = "wps" ]; then
+						iwpriv ra0 set WscConfMode=6
+						iwpriv ra0 set WscMode=2
+						iwpriv ra0 set WscGetConf=1
+						/etc/led-control.sh wps &
+					else
+						logger "wps is not enable..."
+					fi
+				    ;;
+			esac
+		;;
+esac

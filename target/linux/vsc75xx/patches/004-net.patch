@@ -1,0 +1,212 @@
+diff -pruN linux-2.6.23.9/net/bridge/br_forward.c linux-2.6.23.9_with_vtss_bridge/net/bridge/br_forward.c
+--- linux-2.6.23.9/net/bridge/br_forward.c	2007-11-27 01:51:43.000000000 +0800
++++ linux-2.6.23.9_with_vtss_bridge/net/bridge/br_forward.c	2009-01-22 14:25:13.000000000 +0800
+@@ -24,6 +24,13 @@
+ static inline int should_deliver(const struct net_bridge_port *p,
+ 				 const struct sk_buff *skb)
+ {
++	return (skb->dev != p->dev && p->state == BR_STATE_FORWARDING &&
++	        (p->br->filter_count == 0 || (p->br->filter_count > 0 &&  p->filter == 0)));
++}
++
++static inline int should_deliver_local(const struct net_bridge_port *p,
++				 const struct sk_buff *skb)
++{
+ 	return (skb->dev != p->dev && p->state == BR_STATE_FORWARDING);
+ }
+ 
+@@ -80,7 +87,7 @@ static void __br_forward(const struct ne
+ /* called with rcu_read_lock */
+ void br_deliver(const struct net_bridge_port *to, struct sk_buff *skb)
+ {
+-	if (should_deliver(to, skb)) {
++	if (should_deliver_local(to, skb)) {
+ 		__br_deliver(to, skb);
+ 		return;
+ 	}
+@@ -102,15 +109,22 @@ void br_forward(const struct net_bridge_
+ /* called under bridge lock */
+ static void br_flood(struct net_bridge *br, struct sk_buff *skb,
+ 	void (*__packet_hook)(const struct net_bridge_port *p,
+-			      struct sk_buff *skb))
++			      struct sk_buff *skb), int fromcpu)
+ {
+ 	struct net_bridge_port *p;
+ 	struct net_bridge_port *prev;
++	int is_deliver;         
+ 
+ 	prev = NULL;
+ 
+ 	list_for_each_entry_rcu(p, &br->port_list, list) {
+-		if (should_deliver(p, skb)) {
++	    if (fromcpu) {
++	        is_deliver = should_deliver_local(p, skb);   
++	    } else {
++	        is_deliver = should_deliver(p, skb);   
++	    }
++	            
++		if (is_deliver) {
+ 			if (prev != NULL) {
+ 				struct sk_buff *skb2;
+ 
+@@ -139,11 +153,11 @@ static void br_flood(struct net_bridge *
+ /* called with rcu_read_lock */
+ void br_flood_deliver(struct net_bridge *br, struct sk_buff *skb)
+ {
+-	br_flood(br, skb, __br_deliver);
++	br_flood(br, skb, __br_deliver, 1);
+ }
+ 
+ /* called under bridge lock */
+ void br_flood_forward(struct net_bridge *br, struct sk_buff *skb)
+ {
+-	br_flood(br, skb, __br_forward);
++	br_flood(br, skb, __br_forward, 0);
+ }
+diff -pruN linux-2.6.23.9/net/bridge/br_if.c linux-2.6.23.9_with_vtss_bridge/net/bridge/br_if.c
+--- linux-2.6.23.9/net/bridge/br_if.c	2007-11-27 01:51:43.000000000 +0800
++++ linux-2.6.23.9_with_vtss_bridge/net/bridge/br_if.c	2009-01-22 14:25:13.000000000 +0800
+@@ -205,6 +205,7 @@ static struct net_device *new_bridge_dev
+ 	br->topology_change_detected = 0;
+ 	br->ageing_time = 300 * HZ;
+ 	INIT_LIST_HEAD(&br->age_list);
++	br->filter_count = 0;
+ 
+ 	br_stp_timer_init(br);
+ 
+diff -pruN linux-2.6.23.9/net/bridge/br_input.c linux-2.6.23.9_with_vtss_bridge/net/bridge/br_input.c
+--- linux-2.6.23.9/net/bridge/br_input.c	2007-11-27 01:51:43.000000000 +0800
++++ linux-2.6.23.9_with_vtss_bridge/net/bridge/br_input.c	2009-01-22 14:25:13.000000000 +0800
+@@ -47,7 +47,7 @@ int br_handle_frame_finish(struct sk_buf
+ 
+ 	if (!p || p->state == BR_STATE_DISABLED)
+ 		goto drop;
+-
++    
+ 	/* insert into forwarding database after filtering to avoid spoofing */
+ 	br = p->br;
+ 	br_fdb_update(br, p, eth_hdr(skb)->h_source);
+@@ -79,7 +79,9 @@ int br_handle_frame_finish(struct sk_buf
+ 		br_pass_frame_up(br, skb2);
+ 
+ 	if (skb) {
+-		if (dst)
++	    if (p->br->filter_count > 0 &&  p->filter == 1)
++	        goto drop;        
++		if (dst) 
+ 			br_forward(dst->dst, skb);
+ 		else
+ 			br_flood_forward(br, skb);
+diff -pruN linux-2.6.23.9/net/bridge/br_ioctl.c linux-2.6.23.9_with_vtss_bridge/net/bridge/br_ioctl.c
+--- linux-2.6.23.9/net/bridge/br_ioctl.c	2007-11-27 01:51:43.000000000 +0800
++++ linux-2.6.23.9_with_vtss_bridge/net/bridge/br_ioctl.c	2009-01-22 14:25:13.000000000 +0800
+@@ -103,6 +103,35 @@ static int add_del_if(struct net_bridge 
+ 	return ret;
+ }
+ 
++
++static int add_del_filter_if(struct net_bridge *br, int ifindex, int isadd)
++{
++    struct net_bridge_port *p;
++    struct net_device *dev;
++    u16 port_no;
++	int ret = 0;
++	
++	if (!capable(CAP_NET_ADMIN))
++		return -EPERM;
++		
++    dev = dev_get_by_index(ifindex);
++    port_no = dev->br_port->port_no;
++    printk("add_del_filter_if: port_no:%d add:%d\n", port_no, isadd);
++	if ((p = br_get_port(br, port_no)) == NULL)
++		ret = -EINVAL;
++	else
++		p->filter = isadd;
++    
++    if (isadd)
++        br->filter_count++;
++    else
++        br->filter_count--;      
++    
++	return ret;   
++}
++
++
++
+ /*
+  * Legacy ioctl's through SIOCDEVPRIVATE
+  * This interface is deprecated because it was too difficult to
+@@ -392,20 +421,30 @@ int br_ioctl_deviceless_stub(unsigned in
+ 	return -EOPNOTSUPP;
+ }
+ 
++
++#define SIOCBRADDFIF    (SIOCDEVPRIVATE + 1)
++#define SIOCBRDELFIF    (SIOCDEVPRIVATE + 2)
+ int br_dev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
+ {
+ 	struct net_bridge *br = netdev_priv(dev);
+ 
+ 	switch(cmd) {
+ 	case SIOCDEVPRIVATE:
++	    printk("SIOCDEVPRIVATE\n");
+ 		return old_dev_ioctl(dev, rq, cmd);
+ 
++    case SIOCBRADDFIF:
++    case SIOCBRDELFIF:    
++        printk("SIOCBRADDFIF\n");
++        return add_del_filter_if(br, rq->ifr_ifindex, cmd == SIOCBRADDFIF);	
++        
+ 	case SIOCBRADDIF:
+ 	case SIOCBRDELIF:
++	    printk("SIOCBRDELIF\n");
+ 		return add_del_if(br, rq->ifr_ifindex, cmd == SIOCBRADDIF);
+ 
+-	}
++	} 
+ 
+-	pr_debug("Bridge does not support ioctl 0x%x\n", cmd);
++	pr_debug("Bridge does not support ioctl 0x%x\n", cmd);
+ 	return -EOPNOTSUPP;
+ }
+diff -pruN linux-2.6.23.9/net/bridge/br_private.h linux-2.6.23.9_with_vtss_bridge/net/bridge/br_private.h
+--- linux-2.6.23.9/net/bridge/br_private.h	2007-11-27 01:51:43.000000000 +0800
++++ linux-2.6.23.9_with_vtss_bridge/net/bridge/br_private.h	2009-01-22 14:25:13.000000000 +0800
+@@ -83,6 +83,8 @@ struct net_bridge_port
+ 	struct timer_list		message_age_timer;
+ 	struct kobject			kobj;
+ 	struct rcu_head			rcu;
++	
++	u8              filter;
+ };
+ 
+ struct net_bridge
+@@ -125,6 +127,8 @@ struct net_bridge
+ 	struct timer_list		topology_change_timer;
+ 	struct timer_list		gc_timer;
+ 	struct kobject			ifobj;
++	
++	u8              filter_count;
+ };
+ 
+ extern struct notifier_block br_device_notifier;
+@@ -182,6 +186,8 @@ extern int br_add_if(struct net_bridge *
+ 	      struct net_device *dev);
+ extern int br_del_if(struct net_bridge *br,
+ 	      struct net_device *dev);
++extern int br_add_filter_if(struct net_bridge *br,
++         struct net_device *dev);
+ extern int br_min_mtu(const struct net_bridge *br);
+ extern void br_features_recompute(struct net_bridge *br);
+ 
+diff -pruN linux-2.6.23.9/net/bridge/br_stp_if.c linux-2.6.23.9_with_vtss_bridge/net/bridge/br_stp_if.c
+--- linux-2.6.23.9/net/bridge/br_stp_if.c	2009-01-22 17:34:11.000000000 +0800
++++ linux-2.6.23.9_with_vtss_bridge/net/bridge/br_stp_if.c	2009-01-22 14:25:13.000000000 +0800
+@@ -39,6 +39,7 @@ void br_init_port(struct net_bridge_port
+ 	p->state = BR_STATE_BLOCKING;
+ 	p->topology_change_ack = 0;
+ 	p->config_pending = 0;
++	p->filter = 0;
+ }
+ 
+ /* called under bridge lock */

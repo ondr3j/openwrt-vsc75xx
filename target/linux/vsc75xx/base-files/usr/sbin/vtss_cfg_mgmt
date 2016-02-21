@@ -1,0 +1,222 @@
+#!/bin/sh
+# Copyright (C) 2008 Vitesse Semiconductor Corporation
+#
+# The saved configuration file consists of a zipped tar file that contains the following three files:
+# HEADER - a file that contains some info about the current config.
+# MANIFEST - a file that shows the content of the configuration.
+# CONFIG - a tar file that contains all the configuration files.
+#
+# An example of the HEADER file:
+#
+# Version:1
+# Description:WebRocX Configuration File
+# Date:Thu Jan  1 00:00:17 UTC 1970
+# Uname:Linux OpenWrt 2.6.23.9 #2 Thu Feb 21 11:48:29 CET 2008 armv5tejl unknown
+#
+# An example of the MANIFEST file:
+#
+# ./etc/config/
+# ./etc/config/dhcp
+# ./etc/config/cron
+# ./etc/config/fstab
+# ./etc/config/grocx/
+# ./etc/config/grocx/vtss_svcs
+# ./etc/config/upnpd
+# ./etc/config/webif
+# ./etc/config/firewall
+# ./etc/config/dropbear
+# ./etc/config/ntpclient
+# ./etc/config/webifssl
+# ./etc/config/network
+# ./etc/config/syslog
+# ./etc/config/system
+# ./etc/config/openvpn
+#
+# The CONFIG file contains the files listed in the MANIFEST file
+#
+version_field="Version"                            # Field name for version
+#version_value=1                                    # Current version of program/config file
+version_value=2                                    # openssl encrypt version
+description_field="Description"                    # Field name for description
+description_value="WebRocX Configuration File"     # 
+date_field="Date"                                  # Field name for date
+date_value="`date`"                                # Current date
+uname_field="Uname"                                # Field name for uname
+uname_value="`uname -a`"                           # Current date
+
+tempdir="/tmp/vtss-config-$RANDOM.$$"              # tempdir where we can play
+
+backup_path="./jffs/etc/"                               # list of files and or directories to backup (relative to /)
+
+tar_header="HEADER"                                # Header filename in tar file
+tar_manifest="MANIFEST"                            # Manufest filename in tar file
+tar_config="CONFIG"                                # Configuration filename in tar file
+
+cfgfile=""                                         # The configuration filename
+
+bflag=0                                            # Backup configuration
+rflag=0                                            # Restore configuration
+action=
+
+
+restore() {
+    if [ ! -f $cfgfile ] ; then
+        echo "ERROR: $cfgfile does not exist"
+        exit 1
+    fi
+
+    tar -xzf $cfgfile > /dev/null 2>&1
+    if [ $? -ne 0 ] ; then 
+        echo "ERROR: The $cfgfile file is not a zipped tar file"
+        exit 1
+    fi
+
+    # Check that the configuration file contains the needed files
+    if [ ! -f $tar_header ] ; then
+        echo "ERROR: Configuration file does not contain the $tar_header file"
+        exit 1
+    fi
+    if [ ! -f $tar_manifest ] ; then
+        echo "ERROR: Configuration file does not contain the $tar_manifest file"
+        exit 1
+    fi
+    if [ ! -f $tar_config ] ; then
+        echo "ERROR: Configuration file does not contain the $tar_config file"
+        exit 1
+    fi
+
+    # Validate that the header file contains the correct version and description
+    oIFS="$IFS"
+    IFS=":"
+    while read my_field my_value
+    do
+#        echo "-${my_field}-${my_value}-"
+        if [ $my_field = "$version_field" ] ; then
+            my_version="$my_value"
+        elif [ $my_field = "$description_field" ] ; then
+            my_description="$my_value"
+        fi
+
+    done < $tar_header
+    IFS="$oIFS"
+
+    if [ "$my_version" != "$version_value" -a "$my_version" != "1" ] ; then
+        echo "ERROR: Invalid version in configuration file"
+        exit 1
+    fi
+
+	if [ "$my_version" != "1" ] ; then
+		mv $tar_config $tar_config.enc
+		openssl enc -d -aes-256-cbc -in $tar_config.enc -out $tar_config -k $key
+	fi
+	if [ $? -ne 0 ] ; then 
+        echo "ERROR: The $tar_config file could not be restored. Maybe the password is incorrect."
+        exit 1
+    fi
+	rm "$tar_config.enc"
+	
+    if [ "$my_description" != "$description_value" ] ; then
+        echo "ERROR: Invalid description in configuration file"
+        exit 1
+    fi
+
+    # Check that the manifest file corresponds to the config file
+    tar -tf $tar_config > ${tar_manifest}1
+    diff $tar_manifest ${tar_manifest}1 > /dev/null 2>&1
+    if [ $? -ne 0 ] ; then 
+        echo "ERROR: The $tar_manifest file does not match the $tar_config file"
+        exit 1
+    fi
+
+    # Configuration file looks ok - now remove everything in /etc and restore (untar) it
+    find /jffs/etc -type f \! -name META_\* | xargs rm -f
+    tar -x -C / -f $tar_config
+    if [ $? -ne 0 ] ; then 
+        echo "ERROR: The $tar_config file could not be restored"
+        exit 1
+    fi
+}
+
+backup() {
+    tar -c -C / -f $tar_config.ori $backup_path
+    tar -tf $tar_config.ori > $tar_manifest
+	
+	if [ -n "$key" ]; then
+		openssl enc -aes-256-cbc -salt -in $tar_config.ori -out $tar_config -k $key
+	else
+		mv $tar_config.ori $tar_config
+	fi
+	rm -f "tar_config.ori"
+	if [ -n "$key" ]; then
+		echo "${version_field}:${version_value}" > $tar_header
+	else
+		echo "${version_field}:1" > $tar_header
+	fi
+    echo "${description_field}:${description_value}" >> $tar_header
+    echo "${date_field}:${date_value}" >> $tar_header
+    echo "${uname_field}:${uname_value}" >> $tar_header
+    tar -czf $cfgfile $tar_header $tar_manifest $tar_config
+}
+
+usage() {
+    cat <<EOF
+Usage: `basename $0` [-bhrk] FILE
+
+Backup or restore a configuration file.
+
+Options:
+	b	Backup configuration in FILE.
+	h	Help.
+	r	Restore configuration from FILE.
+	k	The password to backup/restore the FILE.
+EOF
+}
+
+#
+# main()
+#
+# Assure that tempdir is removed at program termination or after we received a signal:
+trap 'rm -rf "$tempdir" > /dev/null 2>&1' 0
+trap 'exit 2' 1 2 3 15
+
+mkdir $tempdir
+
+while getopts b:hr:k: opt
+do
+    case $opt in
+        b)	bflag=1
+			cfgfile="$OPTARG"
+            action=backup;;
+        h)	usage
+            	exit 0;;
+        r)	rflag=1
+			cfgfile="$OPTARG"
+            action=restore;;
+		k)	kflag=1
+			key="$OPTARG";;
+        \?)	usage
+            	exit 1;;
+    esac
+done
+
+#shift $(($OPTIND -1))
+if [ $bflag -eq 1 -a $rflag -eq 1 ] ; then
+    echo "ERROR: Option b and r not allowed at the same time"
+    usage
+    exit 1
+fi
+if [ $bflag -eq 0 -a $rflag -eq 0 ] ; then
+    echo "ERROR: Option b or r is required"
+    usage
+    exit 1
+fi
+
+if  [ -z "$cfgfile" ] ; then
+    echo "ERROR: Missing FILE"
+    usage
+    exit 1
+fi
+#cfgfile=$1
+
+cd $tempdir
+eval $action

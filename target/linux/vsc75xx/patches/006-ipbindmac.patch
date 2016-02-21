@@ -1,0 +1,163 @@
+diff -urN linux-2.6.23.9-orig/arch/arm/kernel/calls.S linux-2.6.23.9/arch/arm/kernel/calls.S
+--- linux-2.6.23.9-orig/arch/arm/kernel/calls.S	2009-02-24 18:50:08.000000000 +0800
++++ linux-2.6.23.9/arch/arm/kernel/calls.S	2009-02-24 18:59:12.000000000 +0800
+@@ -361,6 +361,8 @@
+ 		CALL(sys_signalfd)
+ /* 350 */	CALL(sys_timerfd)
+ 		CALL(sys_eventfd)
++/* 352 */	CALL(sys_ipbindmac)
++
+ #ifndef syscalls_counted
+ .equ syscalls_padding, ((NR_syscalls + 3) & ~3) - NR_syscalls
+ #define syscalls_counted
+diff -urN linux-2.6.23.9-orig/include/asm-arm/unistd.h linux-2.6.23.9/include/asm-arm/unistd.h
+--- linux-2.6.23.9-orig/include/asm-arm/unistd.h	2009-02-24 18:52:38.000000000 +0800
++++ linux-2.6.23.9/include/asm-arm/unistd.h	2009-02-24 19:00:11.000000000 +0800
+@@ -379,6 +379,10 @@
+ #define __NR_timerfd			(__NR_SYSCALL_BASE+350)
+ #define __NR_eventfd			(__NR_SYSCALL_BASE+351)
+ 
++
++/* Draytek */
++#define __NR_ipbindmac			(__NR_SYSCALL_BASE+352)
++
+ /*
+  * The following SWIs are ARM private.
+  */
+diff -urN linux-2.6.23.9-orig/kernel/sys.c linux-2.6.23.9/kernel/sys.c
+--- linux-2.6.23.9-orig/kernel/sys.c	2009-02-24 18:55:08.000000000 +0800
++++ linux-2.6.23.9/kernel/sys.c	2009-02-24 19:01:12.000000000 +0800
+@@ -2357,3 +2357,15 @@
+ 	return ret;
+ }
+ EXPORT_SYMBOL_GPL(orderly_poweroff);
++
++
++int ip_bind_mac_mode;
++
++asmlinkage long sys_ipbindmac(unsigned __user mode, unsigned __user *ptr)
++{
++	ip_bind_mac_mode = mode;
++	return 0;
++}
++EXPORT_SYMBOL_GPL(ip_bind_mac_mode);
++
++
+diff -urN linux-2.6.23.9-orig/kernel/sys_ni.c linux-2.6.23.9/kernel/sys_ni.c
+--- linux-2.6.23.9-orig/kernel/sys_ni.c	2009-02-24 18:57:35.000000000 +0800
++++ linux-2.6.23.9/kernel/sys_ni.c	2009-02-24 19:01:20.000000000 +0800
+@@ -149,3 +149,8 @@
+ cond_syscall(compat_sys_signalfd);
+ cond_syscall(compat_sys_timerfd);
+ cond_syscall(sys_eventfd);
++
++/* Draytek */
++cond_syscall(sys_ipbindmac);
++
++
+diff -urN linux-2.6.23.9-orig/net/ipv4/ip_input.c linux-2.6.23.9/net/ipv4/ip_input.c
+--- linux-2.6.23.9-orig/net/ipv4/ip_input.c	2009-02-24 18:46:23.000000000 +0800
++++ linux-2.6.23.9/net/ipv4/ip_input.c	2009-03-06 10:21:16.000000000 +0800
+@@ -374,6 +374,86 @@
+ 	return NET_RX_DROP;
+ }
+ 
++
++/* Drayek : ip bind mac related functions. --- Fanny */
++extern struct neigh_table arp_tbl;
++extern int ip_bind_mac_mode;
++
++static struct neighbour *neigh_lookup_mac(struct neigh_table *tbl, char *mac, struct net_device *dev)
++{
++	struct neighbour *n;
++	int h;
++
++	read_lock_bh(&tbl->lock);
++	for (h = 0; h <= tbl->hash_mask; h++) {
++		for (n = tbl->hash_buckets[h]; n; n = n->next) {
++/*			
++			printk("n->ha:%02x:%02x:%02x:%02x:%02x:%02x mac:%02x:%02x:%02x:%02x:%02x:%02x\n",
++				n->ha[0] & 0xff,
++				n->ha[1] & 0xff,
++				n->ha[2] & 0xff,
++				n->ha[3] & 0xff,
++				n->ha[4] & 0xff,
++				n->ha[5] & 0xff,
++				mac[0] & 0xff,
++				mac[1] & 0xff,
++				mac[2] & 0xff,
++				mac[3] & 0xff,
++				mac[4] & 0xff,
++				mac[5] & 0xff);
++			printk("dev->name:%s n->dev->name:%s\r\n", dev->name, n->dev->name);
++*/			
++			if (dev == n->dev && memcmp(n->ha, mac, ETH_ALEN) == 0) {
++				neigh_hold(n);
++				read_unlock_bh(&tbl->lock);
++				goto exit_loop;
++			}
++		}
++	}
++	read_unlock_bh(&tbl->lock);
++
++exit_loop:
++	return n;
++}
++
++int check_strict_arp(struct sk_buff *skb)
++{
++	
++	struct neighbour *n;
++	u_int32_t saddr;
++	struct iphdr *iph = ip_hdr(skb);
++
++	/* Not from lan, pass it. */
++	if(skb->dev->name[3] != 'l'){  //we check the device name is "br-lan"
++		return 1;
++	}
++
++	saddr = iph->saddr;
++
++	n = neigh_lookup_mac(&arp_tbl, (char*)skb->mac_header+ETH_ALEN, skb->dev);
++	if(n) {
++		neigh_release(n);
++
++		if(saddr == 0UL){
++			return 1;
++		}
++
++		/* Found entry but it's not static entry, block it. */
++		if(!(n->nud_state & NUD_PERMANENT)){
++			return 0;
++		}
++
++		if(*(u_int32_t *)n->primary_key != saddr) {
++			return 0;
++		}
++		return 1;
++	}
++
++	return 0;
++}
++
++/****************************Draytek*****************************/
++
+ /*
+  * 	Main IP Receive routine.
+  */
+@@ -419,6 +499,15 @@
+ 
+ 	iph = ip_hdr(skb);
+ 
++	/**
++	 *	Draytek : ip bind mac checking for strict mode. --- Fanny 
++	 */
++	if(ip_bind_mac_mode == 2) {
++		if(!check_strict_arp(skb))
++			goto drop;
++	}
++	/************************************************/
++
+ 	if (unlikely(ip_fast_csum((u8 *)iph, iph->ihl)))
+ 		goto inhdr_error;
+ 

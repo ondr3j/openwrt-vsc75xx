@@ -1,0 +1,21 @@
+diff -urN linux-2.6.23.9-orig/net/netfilter/nf_conntrack_proto_udp.c linux-2.6.23.9/net/netfilter/nf_conntrack_proto_udp.c
+--- linux-2.6.23.9-orig/net/netfilter/nf_conntrack_proto_udp.c	2009-12-16 10:10:27.000000000 +0800
++++ linux-2.6.23.9/net/netfilter/nf_conntrack_proto_udp.c	2009-12-16 09:41:08.000000000 +0800
+@@ -101,7 +101,7 @@
+ 					if (!check_ratelimit_range((conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip),
+ 									(conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip))) {
+ 						//printk("src=0x%x, dst=0x%x, dir=%d\r\n", conntrack->tuplehash[CTINFO2DIR(ctinfo)].tuple.src.u3.ip, conntrack->tuplehash[CTINFO2DIR(ctinfo)].tuple.dst.u3.ip, CTINFO2DIR(ctinfo));
+-						shnat_nf_add_session_hook(conntrack, NULL, 1);
++						shnat_nf_add_session_hook(conntrack, NULL, 0);
+ 					}
+ 				} else
+ 					shnat_nf_add_session_hook(conntrack, NULL, 0);
+@@ -119,7 +119,7 @@
+ 					/* Not in bandwidth limit range then add this connection into hardware nat table. */
+ 					if(!check_ratelimit_range((conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip),
+ 							(conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip))) {
+-						shnat_nf_add_session_hook(conntrack, NULL, 1);
++						shnat_nf_add_session_hook(conntrack, NULL, 0);
+ 					}
+ 				} else {
+ 					shnat_nf_add_session_hook(conntrack, NULL, 0);

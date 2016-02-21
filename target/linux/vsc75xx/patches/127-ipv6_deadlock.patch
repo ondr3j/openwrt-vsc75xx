@@ -1,0 +1,49 @@
+--- linux-2.6.23.9-orig/net/core/dev.c	2010-03-25 09:18:39.000000000 +0800
++++ linux-2.6.23.9/net/core/dev.c	2010-03-25 11:22:20.000000000 +0800
+@@ -3570,7 +3570,7 @@
+ 	unsigned long rebroadcast_time, warning_time;
+ 
+ 	rebroadcast_time = warning_time = jiffies;
+-	while (atomic_read(&dev->refcnt) != 0) {
++	while (atomic_read(&dev->refcnt) > 0) {
+ 		if (time_after(jiffies, rebroadcast_time + 1 * HZ)) {
+ 			rtnl_lock();
+ 
+@@ -3596,12 +3596,13 @@
+ 
+ 		msleep(250);
+ 
+-		if (time_after(jiffies, warning_time + 10 * HZ)) {
++		if (time_after(jiffies, warning_time + 1 * HZ)) {
+ 			printk(KERN_EMERG "unregister_netdevice: "
+ 			       "waiting for %s to become free. Usage "
+ 			       "count = %d\n",
+ 			       dev->name, atomic_read(&dev->refcnt));
+ 			warning_time = jiffies;
++			dev_put(dev); // workaround for device lock
+ 		}
+ 	}
+ }
+--- linux-2.6.23.9-orig/include/linux/netdevice.h	2010-03-25 09:18:39.000000000 +0800
++++ linux-2.6.23.9/include/linux/netdevice.h	2010-03-25 10:32:30.000000000 +0800
+@@ -843,7 +843,7 @@
+ 
+ static inline void dev_put(struct net_device *dev)
+ {
+-	atomic_dec(&dev->refcnt);
++	if (atomic_read(&dev->refcnt) > 0) atomic_dec(&dev->refcnt);
+ }
+ 
+ static inline void dev_hold(struct net_device *dev)
+--- linux-2.6.23.9-orig/net/ipv6/route.c	2007-11-27 01:51:43.000000000 +0800
++++ linux-2.6.23.9/net/ipv6/route.c	2010-03-25 10:41:44.000000000 +0800
+@@ -991,7 +991,8 @@
+ 	rt = ip6_dst_alloc();
+ 	if (unlikely(rt == NULL)) {
+ 		in6_dev_put(idev);
+-		goto out;
++		//goto out;
++		return NULL; //jimmy for network deadlock when remove bridge interface
+ 	}
+ 
+ 	dev_hold(dev);

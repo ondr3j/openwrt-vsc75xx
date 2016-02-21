@@ -1,0 +1,51 @@
+#!/bin/sh
+#
+# Copyright (C) 2008 Vitesse Semiconductor Corporation
+#
+disks=          # Disks to unmount
+action=
+samba=0
+
+unmount_usb_disk() {
+    umount /dev/sd$1?
+    umount /dev/sd$1
+}
+
+unmount_usb() {
+# stop samba if it is running
+    if [ -f /var/run/samba/smbd.pid ] ; then
+        samba=1
+        /etc/init.d/samba stop
+    fi
+
+# insert a space between each character
+    disks=`echo $disks | sed 's/[a-z]/& /g'`
+
+    for disk in $disks; do
+        unmount_usb_disk $disk
+    done
+
+# start samba if it was running
+    if [ $samba -eq 1 ] ; then
+        /etc/init.d/samba start
+    fi
+}
+
+mount_usb() {
+    udevtrigger --subsystem-match=usb
+}
+
+#
+# main()
+#
+while getopts mu: opt
+do
+    case $opt in
+        m)	action=mount_usb;;
+        u)	disks="$OPTARG"
+            	action=unmount_usb;;
+        \?)	exit 1;;
+    esac
+done
+
+eval $action

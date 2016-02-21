@@ -1,0 +1,20 @@
+config WEBROCX_RELEASE
+	string "The WebRocX Build Release Name"
+	default "Development Build"
+
+config VSC75XX_UBOOT
+	bool "Build u-boot loader"
+	depends @TARGET_vsc75xx
+	default y
+
+config UBOOT_TARGET
+	string "U-Boot Board Configuration"
+	depends VSC75XX_UBOOT
+	default "grocx_scutum"
+	help
+	  For all supported boards there are ready-to-use default
+		configurations available; just type "<board_name>".
+
+config VIGOR_MODEL
+	string "Model Name for Building"
+	default "2130"

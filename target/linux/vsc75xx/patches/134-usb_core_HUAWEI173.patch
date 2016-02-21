@@ -1,0 +1,12 @@
+diff -urN linux-2.6.23.9-orig/drivers/usb/core/generic.c linux-2.6.23.9/drivers/usb/core/generic.c 
+--- linux-2.6.23.9-orig/drivers/usb/core/generic.c  2011-03-25 15:41:25.000000000 +0800
++++ linux-2.6.23.9/drivers/usb/core/generic.c    2011-03-25 15:35:18.000000000 +0800
+@@ -106,7 +106,7 @@
+ 		 * pet nonstandard Ethernet-over-USB protocols, ignore it unless
+ 		 * this kernel has enabled the necessary host side driver.
+ 		 */
+-		if (i == 0 && desc && (is_rndis(desc) || is_activesync(desc))) {
++		if (i == 0 && desc && (is_rndis(desc) || is_activesync(desc)) && (udev->descriptor.idVendor != 0x12d1)) {
+ #if !defined(CONFIG_USB_NET_RNDIS_HOST) && !defined(CONFIG_USB_NET_RNDIS_HOST_MODULE)
+ 			continue;
+ #else

@@ -1,0 +1,274 @@
+diff -urN linux-2.6.23.17-orig/include/linux/kernel.h linux-2.6.23.17/include/linux/kernel.h
+--- linux-2.6.23.17-orig/include/linux/kernel.h	2011-02-08 17:42:49.433090196 +0800
++++ linux-2.6.23.17/include/linux/kernel.h	2011-02-08 17:41:17.524839000 +0800
+@@ -61,6 +61,19 @@
+ #define	KERN_INFO	"<6>"	/* informational			*/
+ #define	KERN_DEBUG	"<7>"	/* debug-level messages			*/
+ 
++/******************** DrayOS Classification *****************/
++// In ascii table, the digit after 0-10 is : ; < = > ?
++
++#define	ROUTER_STATUS_INFO  	"<8>"
++#define	WANLOG_INFO 			"<9>"
++#define	IPFLOG_INFO 			"<:>"
++#define	IPFLOG_ALERT 			"<;>"
++#define	CALLLOG_INFO 			"<<>"
++#define	USRLOG_INFO 			"<=>"
++#define	VPNLOG_INFO 			"<>>"
++
++#define	KERNEL_MAX_LOG_LEVEL	'>' // original is '7'
++
+ extern int console_printk[];
+ 
+ #define console_loglevel (console_printk[0])
+diff -urN linux-2.6.23.9-orig/arch/arm/kernel/calls.S linux-2.6.23.9/arch/arm/kernel/calls.S
+--- linux-2.6.23.9-orig/arch/arm/kernel/calls.S	2010-01-29 10:51:34.000000000 +0800
++++ linux-2.6.23.9/arch/arm/kernel/calls.S	2010-01-21 09:23:01.000000000 +0800
+@@ -361,7 +361,7 @@
+ 		CALL(sys_signalfd)
+ /* 350 */	CALL(sys_timerfd)
+ 		CALL(sys_eventfd)
+-/* 352 */	CALL(sys_ipbindmac)
++/* 352 */	CALL(sys_dray_syscall)
+ 
+ #ifndef syscalls_counted
+ .equ syscalls_padding, ((NR_syscalls + 3) & ~3) - NR_syscalls
+diff -urN linux-2.6.23.9-orig/include/asm-arm/unistd.h linux-2.6.23.9/include/asm-arm/unistd.h
+--- linux-2.6.23.9-orig/include/asm-arm/unistd.h	2010-01-29 10:52:24.000000000 +0800
++++ linux-2.6.23.9/include/asm-arm/unistd.h	2010-01-19 16:42:41.000000000 +0800
+@@ -381,7 +381,7 @@
+ 
+ 
+ /* Draytek */
+-#define __NR_ipbindmac			(__NR_SYSCALL_BASE+352)
++#define __NR_dray_syscall	    (__NR_SYSCALL_BASE+352)
+ 
+ /*
+  * The following SWIs are ARM private.
+diff -urN linux-2.6.23.9-orig/kernel/Makefile linux-2.6.23.9/kernel/Makefile
+--- linux-2.6.23.9-orig/kernel/Makefile	2010-01-29 10:53:16.000000000 +0800
++++ linux-2.6.23.9/kernel/Makefile	2010-01-19 16:35:33.000000000 +0800
+@@ -9,7 +9,7 @@
+ 	    rcupdate.o extable.o params.o posix-timers.o \
+ 	    kthread.o wait.o kfifo.o sys_ni.o posix-cpu-timers.o mutex.o \
+ 	    hrtimer.o rwsem.o latency.o nsproxy.o srcu.o die_notifier.o \
+-	    utsname.o sys_bind_mac.o
++	    utsname.o dray_syscall.o
+ 
+ obj-$(CONFIG_STACKTRACE) += stacktrace.o
+ obj-y += time/
+diff -urN linux-2.6.23.9-orig/kernel/printk.c linux-2.6.23.9/kernel/printk.c
+--- linux-2.6.23.9-orig/kernel/printk.c	2010-01-29 17:53:52.000000000 +0800
++++ linux-2.6.23.9/kernel/printk.c	2010-01-29 17:52:02.000000000 +0800
+@@ -350,17 +350,19 @@
+ static void _call_console_drivers(unsigned long start,
+ 				unsigned long end, int msg_log_level)
+ {
+-	if ((msg_log_level < console_loglevel || ignore_loglevel) &&
++    if(msg_log_level!=13){//skip log level 13 ,level 13 is for user access log 
++	    if ((msg_log_level < console_loglevel || ignore_loglevel) &&
+ 			console_drivers && start != end) {
+-		if ((start & LOG_BUF_MASK) > (end & LOG_BUF_MASK)) {
++		    if ((start & LOG_BUF_MASK) > (end & LOG_BUF_MASK)) {
+ 			/* wrapped write */
+-			__call_console_drivers(start & LOG_BUF_MASK,
++			    __call_console_drivers(start & LOG_BUF_MASK,
+ 						log_buf_len);
+-			__call_console_drivers(0, end & LOG_BUF_MASK);
+-		} else {
+-			__call_console_drivers(start, end);
+-		}
+-	}
++			    __call_console_drivers(0, end & LOG_BUF_MASK);
++		    } else {
++			    __call_console_drivers(start, end);
++		    }
++	    }
++    }
+ }
+ 
+ /*
+@@ -381,7 +383,7 @@
+ 		if (msg_level < 0 && ((end - cur_index) > 2) &&
+ 				LOG_BUF(cur_index + 0) == '<' &&
+ 				LOG_BUF(cur_index + 1) >= '0' &&
+-				LOG_BUF(cur_index + 1) <= '7' &&
++				LOG_BUF(cur_index + 1) <= KERNEL_MAX_LOG_LEVEL && //change for dray syslog utility
+ 				LOG_BUF(cur_index + 2) == '>') {
+ 			msg_level = LOG_BUF(cur_index + 1) - '0';
+ 			cur_index += 3;
+@@ -561,7 +563,7 @@
+ 				 * before the time output.
+ 				 */
+ 				if (p[0] == '<' && p[1] >='0' &&
+-				   p[1] <= '7' && p[2] == '>') {
++				   p[1] <= KERNEL_MAX_LOG_LEVEL && p[2] == '>') { //change for dray syslog utility
+ 					loglev_char = p[1];
+ 					p += 3;
+ 					printed_len -= 3;
+@@ -582,7 +584,7 @@
+ 				printed_len += tlen;
+ 			} else {
+ 				if (p[0] != '<' || p[1] < '0' ||
+-				   p[1] > '7' || p[2] != '>') {
++				   p[1] > KERNEL_MAX_LOG_LEVEL || p[2] != '>') { //change for dray syslog utility
+ 					emit_log_char('<');
+ 					emit_log_char(default_message_loglevel
+ 						+ '0');
+diff -urN linux-2.6.23.9-orig/kernel/sys_ni.c linux-2.6.23.9/kernel/sys_ni.c
+--- linux-2.6.23.9-orig/kernel/sys_ni.c	2010-01-29 10:52:55.000000000 +0800
++++ linux-2.6.23.9/kernel/sys_ni.c	2010-01-21 09:23:04.000000000 +0800
+@@ -151,6 +151,6 @@
+ cond_syscall(sys_eventfd);
+ 
+ /* Draytek */
+-cond_syscall(sys_ipbindmac);
++cond_syscall(sys_dray_syscall);
+ 
+ 
+diff -urN linux-2.6.23.9-orig/net/ipv4/netfilter/nf_conntrack_proto_icmp.c linux-2.6.23.9/net/ipv4/netfilter/nf_conntrack_proto_icmp.c
+--- linux-2.6.23.9-orig/net/ipv4/netfilter/nf_conntrack_proto_icmp.c	2010-01-29 10:29:20.000000000 +0800
++++ linux-2.6.23.9/net/ipv4/netfilter/nf_conntrack_proto_icmp.c	2010-01-29 13:37:28.000000000 +0800
+@@ -80,6 +80,7 @@
+ 	return 0;
+ }
+ 
++extern void (*syslog_user_access_log)(unsigned long src_addr,unsigned long dest_addr,unsigned char *mac_addr,unsigned short dst_port,int pkt_proto);
+ /* Returns verdict for packet, or -1 for invalid. */
+ static int icmp_packet(struct nf_conn *ct,
+ 		       const struct sk_buff *skb,
+@@ -97,7 +98,12 @@
+ 		    && del_timer(&ct->timeout))
+ 			ct->timeout.function((unsigned long)ct);
+ 	} else {
+-		atomic_inc(&ct->proto.icmp.count);
++        if(syslog_user_access_log){/* Draytek :syslog utility user access log */
++            struct ethhdr *eth_header = (struct ethhdr *)skb->mac_header;
++            if(eth_header!=NULL)
++                syslog_user_access_log(ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip,ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip,eth_header->h_source,ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.icmp.type,3);
++        }
++        atomic_inc(&ct->proto.icmp.count);
+ 		nf_conntrack_event_cache(IPCT_PROTOINFO_VOLATILE, skb);
+ 		nf_ct_refresh_acct(ct, ctinfo, skb, nf_ct_icmp_timeout);
+ 	}
+diff -urN linux-2.6.23.9-orig/net/netfilter/nf_conntrack_proto_tcp.c linux-2.6.23.9/net/netfilter/nf_conntrack_proto_tcp.c
+--- linux-2.6.23.9-orig/net/netfilter/nf_conntrack_proto_tcp.c	2010-01-29 10:28:21.000000000 +0800
++++ linux-2.6.23.9/net/netfilter/nf_conntrack_proto_tcp.c	2010-01-29 13:38:16.000000000 +0800
+@@ -846,7 +846,8 @@
+ 
+ 	return NF_ACCEPT;
+ }
+-
++void (*syslog_user_access_log)(unsigned long src_addr,unsigned long dest_addr,unsigned char *mac_addr,unsigned short dst_port,int pkt_proto)=NULL;
++EXPORT_SYMBOL_GPL(syslog_user_access_log);
+ /* Returns verdict for packet, or -1 for invalid. */
+ static int tcp_packet(struct nf_conn *conntrack,
+ 		      const struct sk_buff *skb,
+@@ -1025,10 +1026,26 @@
+ 				/* Connection from LAN->WAN */
+ 				if(!check_ratelimit_range((conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip),
+ 						(conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip))){
++                    if(syslog_user_access_log){/* Draytek :syslog utility user access log */
++                        struct ethhdr *eth_header = (struct ethhdr *)skb->mac_header;
++                        if(eth_header!=NULL){
++                            if (CTINFO2DIR(ctinfo) == IP_CT_DIR_ORIGINAL) {//Only LAN -> WAN
++                                syslog_user_access_log(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip,conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip,eth_header->h_source,ntohs(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.tcp.port),1);
++                            }
++                        }
++                    }
+ 					shnat_nf_add_session_hook(conntrack, NULL, 1);
+ 				}
+ 			} else {
+-				shnat_nf_add_session_hook(conntrack, NULL, 1);
++                if(syslog_user_access_log){/* Draytek :syslog utility user access log */
++                    struct ethhdr *eth_header = (struct ethhdr *)skb->mac_header;
++                    if(eth_header!=NULL){
++                        if (CTINFO2DIR(ctinfo) == IP_CT_DIR_ORIGINAL) {//Only LAN -> WAN
++                            syslog_user_access_log(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip,conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip,eth_header->h_source,ntohs(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.tcp.port),1);
++                        }
++                    }                
++                }
++                shnat_nf_add_session_hook(conntrack, NULL, 1);
+ 			}
+ 		}
+ #endif
+diff -urN linux-2.6.23.9-orig/net/netfilter/nf_conntrack_proto_udp.c linux-2.6.23.9/net/netfilter/nf_conntrack_proto_udp.c
+--- linux-2.6.23.9-orig/net/netfilter/nf_conntrack_proto_udp.c	2010-01-29 10:28:26.000000000 +0800
++++ linux-2.6.23.9/net/netfilter/nf_conntrack_proto_udp.c	2010-01-29 10:37:48.000000000 +0800
+@@ -73,7 +73,7 @@
+ {
+ 	return 0;
+ }
+-
++extern void (*syslog_user_access_log)(unsigned long src_addr,unsigned long dest_addr,unsigned char *mac_addr,unsigned short dst_port,int pkt_proto);
+ /* Returns verdict for packet, and may modify conntracktype */
+ static int udp_packet(struct nf_conn *conntrack,
+ 		      const struct sk_buff *skb,
+@@ -100,13 +100,32 @@
+ 					/* Not in bandwidth limit range then add this connection into hardware nat table. */
+ 					if (!check_ratelimit_range((conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip),
+ 									(conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip))) {
+-						//printk("src=0x%x, dst=0x%x, dir=%d\r\n", conntrack->tuplehash[CTINFO2DIR(ctinfo)].tuple.src.u3.ip, conntrack->tuplehash[CTINFO2DIR(ctinfo)].tuple.dst.u3.ip, CTINFO2DIR(ctinfo));
+-						shnat_nf_add_session_hook(conntrack, NULL, 0);
++		                //printk("src=0x%x, dst=0x%x, dir=%d\r\n", conntrack->tuplehash[CTINFO2DIR(ctinfo)].tuple.src.u3.ip, conntrack->tuplehash[CTINFO2DIR(ctinfo)].tuple.dst.u3.ip, CTINFO2DIR(ctinfo));
++                        /* Draytek :syslog utility user access log */
++                        if(syslog_user_access_log){
++                            struct ethhdr *eth_header = (struct ethhdr *)skb->mac_header;
++                            if(eth_header!=NULL){
++                                if (CTINFO2DIR(ctinfo) == IP_CT_DIR_ORIGINAL) {//Only LAN -> WAN
++                                    syslog_user_access_log(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip,conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip,eth_header->h_source,ntohs(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.udp.port),2);
++                                }                        
++                            }
++                        }
++                        shnat_nf_add_session_hook(conntrack, NULL, 0);
+ 					}
+-				} else
+-					shnat_nf_add_session_hook(conntrack, NULL, 0);
+-				}
+-			}
++				}else{
++				    /* Draytek :syslog utility user access log */
++					if(syslog_user_access_log){
++                        struct ethhdr *eth_header = (struct ethhdr *)skb->mac_header;
++                        if(eth_header!=NULL){
++                            if (CTINFO2DIR(ctinfo) == IP_CT_DIR_ORIGINAL) {//Only LAN -> WAN
++                                syslog_user_access_log(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip,conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip,eth_header->h_source,ntohs(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.udp.port),2);
++                            }
++                        }
++                    }
++                    shnat_nf_add_session_hook(conntrack, NULL, 0);
++                }
++		    }
++	    }
+ #endif
+ 	} else
+ #if defined(CONFIG_NF_CT_ACCT) && defined(CONFIG_STAR_SHNAT) && defined(CONFIG_STAR_SHNAT_UDP_SESSION_BY_PACKET_COUNT)
+@@ -119,9 +138,27 @@
+ 					/* Not in bandwidth limit range then add this connection into hardware nat table. */
+ 					if(!check_ratelimit_range((conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip),
+ 							(conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip))) {
+-						shnat_nf_add_session_hook(conntrack, NULL, 0);
++                        /* Draytek :syslog utility user access log */
++                        if(syslog_user_access_log){
++                            struct ethhdr *eth_header = (struct ethhdr *)skb->mac_header;
++                            if(eth_header!=NULL){
++                                if (CTINFO2DIR(ctinfo) == IP_CT_DIR_ORIGINAL) {//Only LAN -> WAN
++                                    syslog_user_access_log(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip,conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip,eth_header->h_source,ntohs(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.udp.port),2);
++                                }
++                            }                       
++                        }
++                        shnat_nf_add_session_hook(conntrack, NULL, 0);
+ 					}
+ 				} else {
++				    /* Draytek :syslog utility user access log */
++				    if(syslog_user_access_log){
++                        struct ethhdr *eth_header = (struct ethhdr *)skb->mac_header;
++                        if(eth_header!=NULL){
++                            if (CTINFO2DIR(ctinfo) == IP_CT_DIR_ORIGINAL) {//Only LAN -> WAN
++                                syslog_user_access_log(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip,conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip,eth_header->h_source,ntohs(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.udp.port),2);
++                            }
++                        }                    
++                     }
+ 					shnat_nf_add_session_hook(conntrack, NULL, 0);
+ 				}
+ 			}

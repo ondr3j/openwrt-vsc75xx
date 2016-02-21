@@ -1,0 +1,275 @@
+diff -urN linux-2.6.23.9-orig/kernel/Makefile linux-2.6.23.9/kernel/Makefile
+--- linux-2.6.23.9-orig/kernel/Makefile	2009-06-17 12:36:13.000000000 +0800
++++ linux-2.6.23.9/kernel/Makefile	2009-06-19 13:46:05.000000000 +0800
+@@ -9,7 +9,7 @@
+ 	    rcupdate.o extable.o params.o posix-timers.o \
+ 	    kthread.o wait.o kfifo.o sys_ni.o posix-cpu-timers.o mutex.o \
+ 	    hrtimer.o rwsem.o latency.o nsproxy.o srcu.o die_notifier.o \
+-	    utsname.o
++	    utsname.o sys_bind_mac.o
+ 
+ obj-$(CONFIG_STACKTRACE) += stacktrace.o
+ obj-y += time/
+diff -urN linux-2.6.23.9-orig/kernel/sys.c linux-2.6.23.9/kernel/sys.c
+--- linux-2.6.23.9-orig/kernel/sys.c	2009-06-17 12:36:13.000000000 +0800
++++ linux-2.6.23.9/kernel/sys.c	2009-06-19 13:46:05.000000000 +0800
+@@ -2359,13 +2359,3 @@
+ EXPORT_SYMBOL_GPL(orderly_poweroff);
+ 
+ 
+-int ip_bind_mac_mode;
+-
+-asmlinkage long sys_ipbindmac(unsigned __user mode, unsigned __user *ptr)
+-{
+-	ip_bind_mac_mode = mode;
+-	return 0;
+-}
+-EXPORT_SYMBOL_GPL(ip_bind_mac_mode);
+-
+-
+diff -urN linux-2.6.23.9-orig/net/ipv4/ip_forward.c linux-2.6.23.9/net/ipv4/ip_forward.c
+--- linux-2.6.23.9-orig/net/ipv4/ip_forward.c	2009-06-17 12:36:13.000000000 +0800
++++ linux-2.6.23.9/net/ipv4/ip_forward.c	2009-06-19 13:46:05.000000000 +0800
+@@ -52,12 +52,17 @@
+ 	return dst_output(skb);
+ }
+ 
++/* Draytek : rate limit declaration */
++int (*check_limit_rate_from_forward)(struct sk_buff *skb, struct net_device *dev_to) = NULL;
++EXPORT_SYMBOL(check_limit_rate_from_forward);
++
+ int ip_forward(struct sk_buff *skb)
+ {
+ 	struct iphdr *iph;	/* Our header */
+ 	struct rtable *rt;	/* Route we use */
+ 	struct ip_options * opt	= &(IPCB(skb)->opt);
+-
++	struct net_device *dev2;	/* Output device */
++	
+ 	if (!xfrm4_policy_check(NULL, XFRM_POLICY_FWD, skb))
+ 		goto drop;
+ 
+@@ -82,6 +87,12 @@
+ 
+ 	rt = (struct rtable*)skb->dst;
+ 
++	/* Draytek : rate limit, check */
++	dev2 = rt->u.dst.dev;
++	if (check_limit_rate_from_forward)
++		if (check_limit_rate_from_forward(skb, dev2) == 0)
++			goto drop;
++
+ 	if (opt->is_strictroute && rt->rt_dst != rt->rt_gateway)
+ 		goto sr_failed;
+ 
+diff -urN linux-2.6.23.9-orig/net/netfilter/nf_conntrack_core.c linux-2.6.23.9/net/netfilter/nf_conntrack_core.c
+--- linux-2.6.23.9-orig/net/netfilter/nf_conntrack_core.c	2009-06-17 12:36:13.000000000 +0800
++++ linux-2.6.23.9/net/netfilter/nf_conntrack_core.c	2009-06-19 13:46:05.000000000 +0800
+@@ -167,6 +167,15 @@
+ }
+ EXPORT_SYMBOL_GPL(nf_ct_invert_tuple);
+ 
++/* Draytek Fanny : session limit declaration. */
++void (*remove_session_limit_from_conntrack)(struct nf_conn *ct) = NULL;
++void (*add_session_limit_from_conntrack)(struct nf_conn *ct) = NULL;
++int (*check_session_limit_from_conntrack)(struct sk_buff *skb) = NULL;
++EXPORT_SYMBOL(remove_session_limit_from_conntrack);
++EXPORT_SYMBOL(add_session_limit_from_conntrack);
++EXPORT_SYMBOL(check_session_limit_from_conntrack);
++/************************************************/
++
+ static void
+ clean_from_lists(struct nf_conn *ct)
+ {
+@@ -174,6 +183,11 @@
+ 	hlist_del(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnode);
+ 	hlist_del(&ct->tuplehash[IP_CT_DIR_REPLY].hnode);
+ 
++	/* Draytek : session limit, delete */
++	if (remove_session_limit_from_conntrack)
++		if (ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip != ct->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u3.ip)
++			remove_session_limit_from_conntrack(ct);
++	
+ 	/* Destroy all pending expectations */
+ 	nf_ct_remove_expectations(ct);
+ }
+@@ -375,6 +389,11 @@
+ 				      &h->tuple))
+ 			goto out;
+ 
++	/* Draytek : session limit, add */
++	if (add_session_limit_from_conntrack)
++		if (ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip != ct->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u3.ip)
++			add_session_limit_from_conntrack(ct);
++	
+ 	/* Remove from unconfirmed list */
+ 	hlist_del(&ct->tuplehash[IP_CT_DIR_ORIGINAL].hnode);
+ 
+@@ -621,6 +640,12 @@
+ 	/* look for tuple match */
+ 	h = nf_conntrack_find_get(&tuple);
+ 	if (!h) {
++		
++		/* Draytek : session limit, check */
++		if (check_session_limit_from_conntrack)
++			if (check_session_limit_from_conntrack(skb) == 0)
++					return ERR_PTR(-ENOMEM);
++
+ 		h = init_conntrack(&tuple, l3proto, l4proto, skb, dataoff);
+ 		if (!h)
+ 			return NULL;
+diff -urN linux-2.6.23.9-orig/net/netfilter/nf_conntrack_proto_tcp.c linux-2.6.23.9/net/netfilter/nf_conntrack_proto_tcp.c
+--- linux-2.6.23.9-orig/net/netfilter/nf_conntrack_proto_tcp.c	2009-06-17 12:36:13.000000000 +0800
++++ linux-2.6.23.9/net/netfilter/nf_conntrack_proto_tcp.c	2009-06-19 13:46:05.000000000 +0800
+@@ -29,29 +29,26 @@
+ #include <asm/arch/star_shnat_hook.h>
+ #endif
+ 
+-/* Fanny : Add this global structure for bandwidth limit */
+-#if (CONFIG_NETFILTER_XT_MATCH_RATELIMIT_MODULE==1) || (CONFIG_NETFILTER_XT_MATCH_RATELIMIT==1)
+-#include <linux/netfilter/xt_ratelimit.h>
+-
+-struct bl_iprange bandwidth_limit_ip[MAX_BLIMIT_CNT] = {0};
+-int bandwidth_limit_enabled = 0;
+-
+-int check_blimit_range(unsigned long addr1, unsigned long addr2)
++/* Draytek : rate limit */
++int (*check_rate_limit_range_proto)(u_int32_t addr1, u_int32_t addr2) = NULL;
++int (*rate_limit_enabled_proto)(void) = NULL;
++EXPORT_SYMBOL_GPL(check_rate_limit_range_proto);
++EXPORT_SYMBOL_GPL(rate_limit_enabled_proto);
++int is_ratelimit_enabled()
+ {
+-	int i;
+-
+-	/* Check whether this ip in our checking range */
+-	for(i=0; i<MAX_BLIMIT_CNT; i++){
+-		if ((ntohl(addr1) >= bandwidth_limit_ip[i].min_ip
+-			  && ntohl(addr1) <= bandwidth_limit_ip[i].max_ip) ||
+-		   (ntohl(addr2) >= bandwidth_limit_ip[i].min_ip
+-			  && ntohl(addr2) <= bandwidth_limit_ip[i].max_ip)) {
++	if (rate_limit_enabled_proto)
++		if (rate_limit_enabled_proto())
+ 			return true;
+-		}
+-	}
+ 	return false;
+ }
+-#endif
++int check_ratelimit_range(unsigned long addr1, unsigned long addr2)
++{
++	if (check_rate_limit_range_proto)
++		if (check_rate_limit_range_proto((u_int32_t)addr1, (u_int32_t)addr2))
++			return true;
++	return false;
++}
++
+ 
+ /* Protects conntrack->proto.tcp */
+ static DEFINE_RWLOCK(tcp_lock);
+@@ -1022,17 +1019,17 @@
+ 		nf_conntrack_event_cache(IPCT_STATUS, skb);
+ #if defined(CONFIG_STAR_SHNAT)
+ 		if (shnat_hook_ready) {
+-	#if (CONFIG_NETFILTER_XT_MATCH_RATELIMIT_MODULE==1) || (CONFIG_NETFILTER_XT_MATCH_RATELIMIT==1)
+-			/* Not in bandwidth limit range then add this connection into hardware nat table. */
+-			if(bandwidth_limit_enabled){
+-				/* Connection from LAN->WAN */ 
+-				if(!check_blimit_range((conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip),
+-					(conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip))){
++			/* Draytek : rate limit */
++			if (is_ratelimit_enabled()) {
++				/* Not in bandwidth limit range then add this connection into hardware nat table. */	
++				/* Connection from LAN->WAN */
++				if(!check_ratelimit_range((conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip),
++						(conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip))){
+ 					shnat_nf_add_session_hook(conntrack, NULL, 1);
+ 				}
+-			}else
+-	#endif
+-			shnat_nf_add_session_hook(conntrack, NULL, 1);
++			} else {
++				shnat_nf_add_session_hook(conntrack, NULL, 1);
++			}
+ 		}
+ #endif
+ 	}
+@@ -1486,8 +1483,5 @@
+ #endif
+ };
+ EXPORT_SYMBOL_GPL(nf_conntrack_l4proto_tcp6);
+-#if (CONFIG_NETFILTER_XT_MATCH_RATELIMIT_MODULE==1) || (CONFIG_NETFILTER_XT_MATCH_RATELIMIT==1)
+-EXPORT_SYMBOL_GPL(bandwidth_limit_ip);
+-EXPORT_SYMBOL_GPL(bandwidth_limit_enabled);
+-#endif
++
+ 
+diff -urN linux-2.6.23.9-orig/net/netfilter/nf_conntrack_proto_udp.c linux-2.6.23.9/net/netfilter/nf_conntrack_proto_udp.c
+--- linux-2.6.23.9-orig/net/netfilter/nf_conntrack_proto_udp.c	2009-06-17 12:36:13.000000000 +0800
++++ linux-2.6.23.9/net/netfilter/nf_conntrack_proto_udp.c	2009-06-19 13:46:05.000000000 +0800
+@@ -26,9 +26,9 @@
+ #include <asm/arch/star_shnat_hook.h>
+ #endif
+ 
+-#if (CONFIG_NETFILTER_XT_MATCH_RATELIMIT_MODULE==1) || (CONFIG_NETFILTER_XT_MATCH_RATELIMIT==1)
+-#include <linux/netfilter/xt_ratelimit.h>
+-#endif
++/* Draytek : rate limit */
++extern int is_ratelimit_enabled(void);
++extern int check_ratelimit_range(unsigned long addr1, unsigned long addr2);
+ 
+ static unsigned int nf_ct_udp_timeout __read_mostly = 30*HZ;
+ static unsigned int nf_ct_udp_timeout_stream __read_mostly = 180*HZ;
+@@ -95,19 +95,18 @@
+ 			nf_conntrack_event_cache(IPCT_STATUS, skb);
+ #if defined(CONFIG_STAR_SHNAT)
+ 			if (shnat_hook_ready) {
+-	#if (CONFIG_NETFILTER_XT_MATCH_RATELIMIT_MODULE==1) || (CONFIG_NETFILTER_XT_MATCH_RATELIMIT==1)
+-				/* Not in bandwidth limit range then add this connection into hardware nat table. */
+-				if(bandwidth_limit_enabled){
+-					if(!check_blimit_range((conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip),
+-									(conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip))){
++				/* Draytek : rate limit */
++				if (is_ratelimit_enabled()) {
++					/* Not in bandwidth limit range then add this connection into hardware nat table. */
++					if (!check_ratelimit_range((conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip),
++									(conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip))) {
+ 						//printk("src=0x%x, dst=0x%x, dir=%d\r\n", conntrack->tuplehash[CTINFO2DIR(ctinfo)].tuple.src.u3.ip, conntrack->tuplehash[CTINFO2DIR(ctinfo)].tuple.dst.u3.ip, CTINFO2DIR(ctinfo));
+ 						shnat_nf_add_session_hook(conntrack, NULL, 1);
+ 					}
+-				}else
+-	#endif
+-				shnat_nf_add_session_hook(conntrack, NULL, 0);
++				} else
++					shnat_nf_add_session_hook(conntrack, NULL, 0);
++				}
+ 			}
+-		}
+ #endif
+ 	} else
+ #if defined(CONFIG_NF_CT_ACCT) && defined(CONFIG_STAR_SHNAT) && defined(CONFIG_STAR_SHNAT_UDP_SESSION_BY_PACKET_COUNT)
+@@ -115,16 +114,16 @@
+ //printk("%s: packet=%d\n",__FUNCTION__,conntrack->counters[CTINFO2DIR(ctinfo)].packets);
+ 		if (conntrack->counters[CTINFO2DIR(ctinfo)].packets >= (CONFIG_STAR_SHNAT_UDP_PACKET_COUNT_THRESH-1)) {
+ 			if (shnat_hook_ready) {
+-	#if (CONFIG_NETFILTER_XT_MATCH_RATELIMIT_MODULE==1) || (CONFIG_NETFILTER_XT_MATCH_RATELIMIT==1)
+-				/* Not in bandwidth limit range then add this connection into hardware nat table. */
+-				if(bandwidth_limit_enabled){
+-					if(!check_blimit_range((conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip),
+-						(conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip))){
++				/* Draytek : rate limit */
++				if (is_ratelimit_enabled()) {
++					/* Not in bandwidth limit range then add this connection into hardware nat table. */
++					if(!check_ratelimit_range((conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.u3.ip),
++							(conntrack->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip))) {
+ 						shnat_nf_add_session_hook(conntrack, NULL, 1);
+ 					}
+-				}else
+-	#endif
+-				shnat_nf_add_session_hook(conntrack, NULL, 0);
++				} else {
++					shnat_nf_add_session_hook(conntrack, NULL, 0);
++				}
+ 			}
+ 		}
+ 

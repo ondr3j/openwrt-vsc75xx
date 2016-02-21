@@ -1,0 +1,27 @@
+diff -urN linux-2.6.23.17-orig/drivers/usb/serial/Kconfig linux-2.6.23.17/drivers/usb/serial/Kconfig
+--- linux-2.6.23.17-orig/drivers/usb/serial/Kconfig	2010-12-06 11:25:38.000000000 +0800
++++ linux-2.6.23.17/drivers/usb/serial/Kconfig	2010-12-06 13:23:02.000000000 +0800
+@@ -555,6 +555,12 @@
+ 	  If this driver doesn't recognize your device,
+ 	  it might be accessible via the FTDI_SIO driver.
+ 
++config USB_SERIAL_HSO
++	tristate "USB driver for Option High Speed Mobile Devices"
++	depends on USB_SERIAL
++	default m
++	help
++
+ config USB_SERIAL_OMNINET
+ 	tristate "USB ZyXEL omni.net LCD Plus Driver (EXPERIMENTAL)"
+ 	depends on USB_SERIAL && EXPERIMENTAL
+diff -urN linux-2.6.23.17-orig/drivers/usb/serial/Makefile linux-2.6.23.17/drivers/usb/serial/Makefile
+--- linux-2.6.23.17-orig/drivers/usb/serial/Makefile	2010-12-03 18:17:32.000000000 +0800
++++ linux-2.6.23.17/drivers/usb/serial/Makefile	2010-12-02 15:32:18.000000000 +0800
+@@ -27,6 +27,7 @@
+ obj-$(CONFIG_USB_SERIAL_FUNSOFT)		+= funsoft.o
+ obj-$(CONFIG_USB_SERIAL_GARMIN)			+= garmin_gps.o
+ obj-$(CONFIG_USB_SERIAL_HP4X)			+= hp4x.o
++obj-$(CONFIG_USB_SERIAL_HSO)			+= hso.o
+ obj-$(CONFIG_USB_SERIAL_IPAQ)			+= ipaq.o
+ obj-$(CONFIG_USB_SERIAL_IPW)			+= ipw.o
+ obj-$(CONFIG_USB_SERIAL_IR)			+= ir-usb.o

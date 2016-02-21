@@ -1,0 +1,14 @@
+diff -urN linux-2.6.23.17-orig/net/netfilter/nf_conntrack_proto_tcp.c linux-2.6.23.17/net/netfilter/nf_conntrack_proto_tcp.c
+--- linux-2.6.23.17-orig/net/netfilter/nf_conntrack_proto_tcp.c	2011-10-13 16:21:25.000000000 +0800
++++ linux-2.6.23.17/net/netfilter/nf_conntrack_proto_tcp.c	2011-10-21 13:20:28.000000000 +0800
+@@ -1064,7 +1064,9 @@
+ 	nf_ct_refresh_acct(conntrack, ctinfo, skb, timeout);
+ 
+ #if defined(CONFIG_STAR_SHNAT)
+-		if (shnat_hook_ready && conntrack->counters[IP_CT_DIR_ORIGINAL].packets > CONFIG_STAR_SHNAT_PACKET_SKIP_COUNT) {
++		if (shnat_hook_ready && conntrack->counters[IP_CT_DIR_ORIGINAL].packets > CONFIG_STAR_SHNAT_PACKET_SKIP_COUNT &&
++			ntohs(conntrack->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.u.tcp.port) != 1723 //do not add  pptp control session into shnat
++			) {
+ 			/* Draytek : rate limit */
+ 			if (is_ratelimit_enabled()) {
+ 				/* Not in bandwidth limit range then add this connection into hardware nat table. */	

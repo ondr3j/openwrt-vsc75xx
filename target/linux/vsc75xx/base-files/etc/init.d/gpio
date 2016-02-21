@@ -1,0 +1,24 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2008 Vitesse Semiconductor
+
+START=10
+
+start() {
+    local file=/proc/machine-type
+    if [ -f $file ]; then
+        case `cat $file` in
+            (1956) 
+            logger "VSC5605EV GPIO setup - enable USB"
+            echo "in" > /proc/gpio/GPIOB12 # USB_nOC1
+            echo "in" > /proc/gpio/GPIOB13 # USB_nOC2
+            echo "out,set" > /proc/gpio/GPIOB14 # USB_EN1
+            echo "out,set" > /proc/gpio/GPIOB15 # USB_EN1
+            ;;
+            (*)
+            echo "set" > /proc/gpio/GPIOA4  # HUB
+            echo "set" > /proc/gpio/GPIOA12 # USB1
+            echo "set" > /proc/gpio/GPIOA31 # USB2
+            ;;
+        esac
+    fi
+}

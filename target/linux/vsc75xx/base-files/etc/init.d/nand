@@ -1,0 +1,16 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006 OpenWrt.org 
+
+START=11
+
+start() {
+    local part=`grep 'NAND Flash' /proc/mtd | cut -b 4`
+    local blkdev="/dev/mtdblock$part"
+    if [ -n "$part" -a -b "$blkdev" ]; then
+        grep -q "$blkdev" /proc/mounts || {
+            echo "Mounting NAND found on $blkdev"
+            mkdir -p /mnt/nand
+            mount -t jffs2 $blkdev /mnt/nand
+        }
+    fi
+}

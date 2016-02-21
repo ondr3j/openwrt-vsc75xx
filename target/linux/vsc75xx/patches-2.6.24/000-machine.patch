@@ -1,0 +1,236 @@
+diff -ur -x CVS linux-2.6.24.7/arch/arm/boot/bootp/bootp.lds linux-2.6.24.7-grocx/arch/arm/boot/bootp/bootp.lds
+--- linux-2.6.24.7/arch/arm/boot/bootp/bootp.lds	2008-05-07 01:22:34.000000000 +0200
++++ linux-2.6.24.7-grocx/arch/arm/boot/bootp/bootp.lds	2008-10-30 20:25:16.000000000 +0100
+@@ -17,6 +17,7 @@
+    *(.start)
+    *(.text)
+    initrd_size = initrd_end - initrd_start;
++   kernel_size = kernel_end - kernel_start;
+    _etext = .;
+   }
+   
+diff -ur -x CVS linux-2.6.24.7/arch/arm/boot/bootp/init.S linux-2.6.24.7-grocx/arch/arm/boot/bootp/init.S
+--- linux-2.6.24.7/arch/arm/boot/bootp/init.S	2008-05-07 01:22:34.000000000 +0200
++++ linux-2.6.24.7-grocx/arch/arm/boot/bootp/init.S	2008-10-30 20:25:16.000000000 +0100
+@@ -22,9 +22,13 @@
+ 
+ _start:		add	lr, pc, #-0x8		@ lr = current load addr
+ 		adr	r13, data
+-		ldmia	r13!, {r4-r6}		@ r5 = dest, r6 = length
++		ldmia	r13!, {r4-r6}		@ r5 = initrd_phys, r6 = initrd_size
+ 		add	r4, r4, lr		@ r4 = initrd_start + load addr
+ 		bl	move			@ move the initrd
++		ldmia	r13!, {r4-r6}		@ r5 = kernel_phys, r6 = kernel_size
++		add	r4, r4, lr		@ r4 = kernel_start + load addr
++		mov	r12, r5			@ save kernel_phys to r12
++		bl	move			@ move the kernel
+ 
+ /*
+  * Setup the initrd parameters to pass to the kernel.  This can only be
+@@ -58,7 +62,7 @@
+ 
+ 		mov	r5, #4			@ Size of initrd tag (4 words)
+ 		stmia	r9, {r5, r6, r7, r8, r10}
+-		b	kernel_start		@ call kernel
++		mov	pc, r12
+ 
+ /*
+  * Move the block of memory length r6 from address r4 to address r5
+@@ -77,6 +81,9 @@
+ data:		.word	initrd_start		@ source initrd address
+ 		.word	initrd_phys		@ destination initrd address
+ 		.word	initrd_size		@ initrd size
++		.word	kernel_start		@ source kernel address
++		.word	kernel_phys		@ destination kernel address
++		.word	kernel_size		@ kernel size
+ 
+ 		.word	0x54410001		@ r5 = ATAG_CORE
+ 		.word	0x54420005		@ r6 = ATAG_INITRD2
+diff -ur -x CVS linux-2.6.24.7/arch/arm/boot/bootp/Makefile linux-2.6.24.7-grocx/arch/arm/boot/bootp/Makefile
+--- linux-2.6.24.7/arch/arm/boot/bootp/Makefile	2008-05-07 01:22:34.000000000 +0200
++++ linux-2.6.24.7-grocx/arch/arm/boot/bootp/Makefile	2008-10-30 20:25:16.000000000 +0100
+@@ -7,6 +7,7 @@
+ 
+ LDFLAGS_bootp	:=-p --no-undefined -X \
+ 		 --defsym initrd_phys=$(INITRD_PHYS) \
++		 --defsym kernel_phys=$(KERNEL_PHYS) \
+ 		 --defsym params_phys=$(PARAMS_PHYS) -T
+ AFLAGS_initrd.o :=-DINITRD=\"$(INITRD)\"
+ 
+diff -ur -x CVS linux-2.6.24.7/arch/arm/boot/compressed/head.S linux-2.6.24.7-grocx/arch/arm/boot/compressed/head.S
+--- linux-2.6.24.7/arch/arm/boot/compressed/head.S	2008-05-07 01:22:34.000000000 +0200
++++ linux-2.6.24.7-grocx/arch/arm/boot/compressed/head.S	2008-10-30 20:25:16.000000000 +0100
+@@ -57,6 +57,13 @@
+ 		mov	\rb, #0x50000000
+ 		add	\rb, \rb, #0x4000 * CONFIG_S3C_LOWLEVEL_UART_PORT
+ 		.endm
++#elif defined(CONFIG_ARCH_GROCX)
++		.macro	loadsp, rb
++		mov	\rb, #0x78000000
++		.endm
++		.macro	writeb, rb
++		strb	\rb, [r3, #0]
++		.endm
+ #else
+ 		.macro	loadsp,	rb
+ 		addruart \rb
+diff -ur -x CVS linux-2.6.24.7/arch/arm/boot/compressed/Makefile linux-2.6.24.7-grocx/arch/arm/boot/compressed/Makefile
+--- linux-2.6.24.7/arch/arm/boot/compressed/Makefile	2008-05-07 01:22:34.000000000 +0200
++++ linux-2.6.24.7-grocx/arch/arm/boot/compressed/Makefile	2008-10-30 20:25:16.000000000 +0100
+@@ -44,6 +44,10 @@
+ OBJS		+= head-sharpsl.o
+ endif
+ 
++ifeq ($(CONFIG_ARCH_GROCX),y)
++OBJS		+= head-grocx.o
++endif
++
+ ifeq ($(CONFIG_ARCH_AT91RM9200),y)
+ OBJS		+= head-at91rm9200.o
+ endif
+diff -ur -x CVS linux-2.6.24.7/arch/arm/boot/Makefile linux-2.6.24.7-grocx/arch/arm/boot/Makefile
+--- linux-2.6.24.7/arch/arm/boot/Makefile	2008-05-07 01:22:34.000000000 +0200
++++ linux-2.6.24.7-grocx/arch/arm/boot/Makefile	2008-10-30 20:25:16.000000000 +0100
+@@ -24,8 +24,9 @@
+ ZRELADDR    := $(zreladdr-y)
+ PARAMS_PHYS := $(params_phys-y)
+ INITRD_PHYS := $(initrd_phys-y)
++KERNEL_PHYS := $(kernel_phys-y)
+ 
+-export ZRELADDR INITRD_PHYS PARAMS_PHYS
++export ZRELADDR INITRD_PHYS KERNEL_PHYS PARAMS_PHYS
+ 
+ targets := Image zImage xipImage bootpImage uImage
+ 
+diff -ur -x CVS linux-2.6.24.7/arch/arm/Kconfig linux-2.6.24.7-grocx/arch/arm/Kconfig
+--- linux-2.6.24.7/arch/arm/Kconfig	2008-05-07 01:22:34.000000000 +0200
++++ linux-2.6.24.7-grocx/arch/arm/Kconfig	2008-10-30 20:25:16.000000000 +0100
+@@ -183,6 +183,12 @@
+ 	  This enables support for systems based on the Atmel AT91RM9200
+ 	  and AT91SAM9xxx processors.
+ 
++config ARCH_GROCX
++	bool "VITESSE-GROCX"
++	select PCI
++	help
++	  Vitesse is a platform based on ARM926EJ processor architecture.
++
+ config ARCH_CLPS7500
+ 	bool "Cirrus CL-PS7500FE"
+ 	select TIMER_ACORN
+diff -ur -x CVS linux-2.6.24.7/arch/arm/kernel/bios32.c linux-2.6.24.7-grocx/arch/arm/kernel/bios32.c
+--- linux-2.6.24.7/arch/arm/kernel/bios32.c	2008-05-07 01:22:34.000000000 +0200
++++ linux-2.6.24.7-grocx/arch/arm/kernel/bios32.c	2008-10-30 20:25:16.000000000 +0100
+@@ -689,6 +689,13 @@
+ 	if ((dev->class >> 16) == PCI_BASE_CLASS_BRIDGE)
+ 		cmd |= PCI_COMMAND_IO | PCI_COMMAND_MEMORY;
+ 
++#if 0
++#if defined(CONFIG_ARCH_GROCX)
++	cmd |= PCI_COMMAND_MASTER;
++	cmd |= (PCI_COMMAND_PARITY | PCI_COMMAND_SERR);
++#endif
++#endif
++
+ 	if (cmd != old_cmd) {
+ 		printk("PCI: enabling device %s (%04x -> %04x)\n",
+ 		       pci_name(dev), old_cmd, cmd);
+Only in linux-2.6.24.7-grocx/arch/arm/kernel: bios32.c.orig
+diff -ur -x CVS linux-2.6.24.7/arch/arm/kernel/entry-armv.S linux-2.6.24.7-grocx/arch/arm/kernel/entry-armv.S
+--- linux-2.6.24.7/arch/arm/kernel/entry-armv.S	2008-05-07 01:22:34.000000000 +0200
++++ linux-2.6.24.7-grocx/arch/arm/kernel/entry-armv.S	2008-10-30 20:25:16.000000000 +0100
+@@ -28,6 +28,11 @@
+  */
+ 	.macro	irq_handler
+ 	get_irqnr_preamble r5, lr
++#ifdef CONFIG_VIC_INTERRUPT
++	get_irqnr_and_base r0, r6, r5, lr
++	mov     r1, sp
++	bl      asm_do_IRQ
++#else
+ 1:	get_irqnr_and_base r0, r6, r5, lr
+ 	movne	r1, sp
+ 	@
+@@ -35,6 +40,7 @@
+ 	@
+ 	adrne	lr, 1b
+ 	bne	asm_do_IRQ
++#endif
+ 
+ #ifdef CONFIG_SMP
+ 	/*
+diff -ur -x CVS linux-2.6.24.7/arch/arm/kernel/setup.c linux-2.6.24.7-grocx/arch/arm/kernel/setup.c
+--- linux-2.6.24.7/arch/arm/kernel/setup.c	2008-05-07 01:22:34.000000000 +0200
++++ linux-2.6.24.7-grocx/arch/arm/kernel/setup.c	2008-10-30 20:25:16.000000000 +0100
+@@ -801,6 +801,10 @@
+ 
+ #endif
+ 
++#ifdef CONFIG_ARCH_GROCX
++extern void __init grocx_early_init(void);
++#endif
++
+ void __init setup_arch(char **cmdline_p)
+ {
+ 	struct tag *tags = (struct tag *)&init_tags;
+@@ -866,6 +870,10 @@
+ 
+ 	cpu_init();
+ 
++#ifdef CONFIG_ARCH_GROCX
++	grocx_early_init();
++#endif
++
+ 	/*
+ 	 * Set up various architecture-specific pointers
+ 	 */
+Only in linux-2.6.24.7-grocx/arch/arm/kernel: setup.c.orig
+diff -ur -x CVS linux-2.6.24.7/arch/arm/Makefile linux-2.6.24.7-grocx/arch/arm/Makefile
+--- linux-2.6.24.7/arch/arm/Makefile	2008-05-07 01:22:34.000000000 +0200
++++ linux-2.6.24.7-grocx/arch/arm/Makefile	2008-10-30 20:25:16.000000000 +0100
+@@ -130,6 +130,7 @@
+  machine-$(CONFIG_ARCH_AAEC2000)   := aaec2000
+  machine-$(CONFIG_ARCH_REALVIEW)   := realview
+  machine-$(CONFIG_ARCH_AT91)	   := at91
++ machine-$(CONFIG_ARCH_GROCX)      := grocx
+  machine-$(CONFIG_ARCH_EP93XX)	   := ep93xx
+  machine-$(CONFIG_ARCH_PNX4008)	   := pnx4008
+  machine-$(CONFIG_ARCH_NETX)	   := netx
+diff -ur -x CVS linux-2.6.24.7/arch/arm/mm/Kconfig linux-2.6.24.7-grocx/arch/arm/mm/Kconfig
+--- linux-2.6.24.7/arch/arm/mm/Kconfig	2008-05-07 01:22:34.000000000 +0200
++++ linux-2.6.24.7-grocx/arch/arm/mm/Kconfig	2008-10-30 20:25:16.000000000 +0100
+@@ -171,8 +171,8 @@
+ # ARM926T
+ config CPU_ARM926T
+ 	bool "Support ARM926T processor"
+-	depends on ARCH_INTEGRATOR || ARCH_VERSATILE_PB || MACH_VERSATILE_AB || ARCH_OMAP730 || ARCH_OMAP16XX || MACH_REALVIEW_EB || ARCH_PNX4008 || ARCH_NETX || CPU_S3C2412 || ARCH_AT91SAM9260 || ARCH_AT91SAM9261 || ARCH_AT91SAM9263 || ARCH_AT91SAM9RL || ARCH_NS9XXX || ARCH_DAVINCI
+-	default y if ARCH_VERSATILE_PB || MACH_VERSATILE_AB || ARCH_OMAP730 || ARCH_OMAP16XX || ARCH_PNX4008 || ARCH_NETX || CPU_S3C2412 || ARCH_AT91SAM9260 || ARCH_AT91SAM9261 || ARCH_AT91SAM9263 || ARCH_AT91SAM9RL || ARCH_NS9XXX || ARCH_DAVINCI
++	depends on ARCH_INTEGRATOR || ARCH_VERSATILE_PB || MACH_VERSATILE_AB || ARCH_OMAP730 || ARCH_OMAP16XX || MACH_REALVIEW_EB || ARCH_PNX4008 || ARCH_NETX || CPU_S3C2412 || ARCH_AT91SAM9260 || ARCH_AT91SAM9261 || ARCH_AT91SAM9263 || ARCH_AT91SAM9RL || ARCH_NS9XXX || ARCH_DAVINCI || ARCH_GROCX
++	default y if ARCH_VERSATILE_PB || MACH_VERSATILE_AB || ARCH_OMAP730 || ARCH_OMAP16XX || ARCH_PNX4008 || ARCH_NETX || CPU_S3C2412 || ARCH_AT91SAM9260 || ARCH_AT91SAM9261 || ARCH_AT91SAM9263 || ARCH_AT91SAM9RL || ARCH_NS9XXX || ARCH_DAVINCI || ARCH_GROCX
+ 	select CPU_32v5
+ 	select CPU_ABRT_EV5TJ
+ 	select CPU_CACHE_VIVT
+diff -ur -x CVS linux-2.6.24.7/arch/arm/tools/mach-types linux-2.6.24.7-grocx/arch/arm/tools/mach-types
+--- linux-2.6.24.7/arch/arm/tools/mach-types	2008-05-07 01:22:34.000000000 +0200
++++ linux-2.6.24.7-grocx/arch/arm/tools/mach-types	2008-10-30 20:25:16.000000000 +0100
+@@ -1093,6 +1093,8 @@
+ eti_b1			MACH_ETI_B1		ETI_B1			1080
+ za9l_series		MACH_ZILOG_ZA9L		ZILOG_ZA9L		1081
+ bit2440			MACH_BIT2440		BIT2440			1082
++grocx			ARCH_GROCX		GROCX			1474
++vsc5605ev		ARCH_GROCX		VSC5605EV		1956
+ nbi			MACH_NBI		NBI			1083
+ smdk2443		MACH_SMDK2443		SMDK2443		1084
+ vdavinci		MACH_VDAVINCI		VDAVINCI		1085
+diff -ur -x CVS linux-2.6.24.7/init/Kconfig linux-2.6.24.7-grocx/init/Kconfig
+--- linux-2.6.24.7/init/Kconfig	2008-05-07 01:22:34.000000000 +0200
++++ linux-2.6.24.7-grocx/init/Kconfig	2008-10-30 20:25:16.000000000 +0100
+@@ -7,6 +7,8 @@
+ 	default "/boot/config-$UNAME_RELEASE"
+ 	default "arch/$ARCH/defconfig"
+ 
++source "arch/arm/mach-grocx/Kconfig"
++
+ menu "General setup"
+ 
+ config EXPERIMENTAL

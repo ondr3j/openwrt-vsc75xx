@@ -1,0 +1,29 @@
+if [ -n "$ntpsrv" ]; then
+    for i in $ntpsrv ; do
+        echo -n "syncing time with ntp server $i ... "
+        if /usr/sbin/ntpclient -c 1 -s -h $i 2>&- >&- ; then
+            echo "done"
+            break
+        else
+            echo "failed"
+        fi
+    done
+fi
+
+if [ "$interface" = "br-lan" ] ; then
+    local lanip=$(ifconfig br-lan | grep inet | cut -d : -f 2 | cut -d " " -f 1)
+    /bin/echo "info set lanip:"$lanip"" | shnat_cli > /dev/null
+elif [ "$interface" = "br-wan" ] ; then
+    local wanip=$(ifconfig br-wan | grep inet | cut -d : -f 2 | cut -d " " -f 1)
+    /bin/echo "wanip set index:0 ip:"$wanip"" | shnat_cli > /dev/null
+	sh /etc/check_shnat_ip.sh &
+elif [ "$interface" = "br-wan2" ] ; then
+    local wan2ip=$(ifconfig br-wan2 | grep inet | cut -d : -f 2 | cut -d " " -f 1)
+    /bin/echo "wanip set index:1 ip:"$wan2ip"" | shnat_cli > /dev/null    
+	sh /etc/check_shnat_ip.sh &
+	/etc/init.d/firewall restart
+fi
+
+if [ "$1" = "newip" ] ; then
+	sh /lib/firewall/user.sh &
+fi

@@ -1,0 +1,216 @@
+diff -ur -x CVS linux-2.6.23.9/net/bridge/br_stp_if.c linux-2.6.23.9-grocx/net/bridge/br_stp_if.c
+--- linux-2.6.23.9/net/bridge/br_stp_if.c	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/net/bridge/br_stp_if.c	2008-01-10 17:19:55.000000000 +0100
+@@ -217,8 +217,10 @@
+ 	struct net_bridge_port *p;
+ 
+ 	list_for_each_entry(p, &br->port_list, list) {
++#if CONFIG_BRIDGE_ID_POLICY_MINIMUM
+ 		if (addr == br_mac_zero ||
+ 		    memcmp(p->dev->dev_addr, addr, ETH_ALEN) < 0)
++#endif
+ 			addr = p->dev->dev_addr;
+ 
+ 	}
+diff -ur -x CVS linux-2.6.23.9/net/core/dev.c linux-2.6.23.9-grocx/net/core/dev.c
+--- linux-2.6.23.9/net/core/dev.c	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/net/core/dev.c	2008-01-09 12:43:04.000000000 +0100
+@@ -119,6 +119,10 @@
+ #include <linux/ctype.h>
+ #include <linux/if_arp.h>
+ 
++#if defined(CONFIG_STAR_SHNAT)
++#include <asm/arch/star_shnat_hook.h>
++#endif
++
+ /*
+  *	The list of packet types we will receive (as opposed to discard)
+  *	and the routines to invoke.
+@@ -1713,6 +1717,12 @@
+ 	if (!skb->tstamp.tv64)
+ 		net_timestamp(skb);
+ 
++#ifdef CONFIG_STAR_SHNAT
++	if (shnat_pcifp_forward_skb_hook && shnat_pcifp_forward_skb_hook(skb) == 0) {
++		return NET_RX_SUCCESS;
++	}
++#endif
++
+ 	/*
+ 	 * The code is rearranged so that the path is the most
+ 	 * short when CPU is congested, but is still operating.
+@@ -1933,6 +1943,12 @@
+ 	if (!skb->tstamp.tv64)
+ 		net_timestamp(skb);
+ 
++#ifdef CONFIG_STAR_SHNAT
++	if (shnat_pcifp_forward_skb_hook && shnat_pcifp_forward_skb_hook(skb) == 0) {
++		return NET_RX_SUCCESS;
++	}
++#endif
++
+ 	if (!skb->iif)
+ 		skb->iif = skb->dev->ifindex;
+ 
+diff -ur -x CVS linux-2.6.23.9/net/netfilter/nf_conntrack_core.c linux-2.6.23.9-grocx/net/netfilter/nf_conntrack_core.c
+--- linux-2.6.23.9/net/netfilter/nf_conntrack_core.c	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/net/netfilter/nf_conntrack_core.c	2007-12-26 03:28:31.000000000 +0100
+@@ -38,6 +38,10 @@
+ #include <net/netfilter/nf_conntrack_core.h>
+ #include <net/netfilter/nf_conntrack_extend.h>
+ 
++#if defined(CONFIG_STAR_SHNAT)
++#include <asm/arch/star_shnat_hook.h>
++#endif
++
+ #define NF_CONNTRACK_VERSION	"0.5.0"
+ 
+ DEFINE_RWLOCK(nf_conntrack_lock);
+@@ -238,6 +242,15 @@
+ 	}
+ 
+ 	write_lock_bh(&nf_conntrack_lock);
++#if defined(CONFIG_STAR_SHNAT)
++	if (shnat_hook_ready) {
++		if(shnat_nf_remove_session_hook(ct) == -1) {
++			write_unlock_bh(&nf_conntrack_lock);
++			nf_conntrack_event( IPCT_REFRESH, ct);
++			return;
++		}
++	}
++#endif
+ 	/* Inside lock so preempt is disabled on module removal path.
+ 	 * Otherwise we can get spurious warnings. */
+ 	NF_CT_STAT_INC(delete_list);
+@@ -932,9 +945,20 @@
+ 	unsigned int bucket = 0;
+ 
+ 	while ((ct = get_next_corpse(iter, data, &bucket)) != NULL) {
++#if defined(CONFIG_STAR_SHNAT)
++		{
++			atomic_set(&ct->ct_general.use,atomic_read(&ct->ct_general.use)+60000);
++#endif /* defined(CONFIG_STAR_SHNAT) */
+ 		/* Time to push up daises... */
+ 		if (del_timer(&ct->timeout))
+ 			death_by_timeout((unsigned long)ct);
++#if defined(CONFIG_STAR_SHNAT)
++            atomic_set(&ct->ct_general.use,atomic_read(&ct->ct_general.use)-60000);
++            if(atomic_read(&ct->ct_general.use) == 0){
++                    atomic_set(&ct->ct_general.use, 1);
++            }
++        }
++#endif /* defined(CONFIG_STAR_SHNAT)  */
+ 		/* ... else the timer will get him soon. */
+ 
+ 		nf_ct_put(ct);
+diff -ur -x CVS linux-2.6.23.9/net/netfilter/nf_conntrack_proto_tcp.c linux-2.6.23.9-grocx/net/netfilter/nf_conntrack_proto_tcp.c
+--- linux-2.6.23.9/net/netfilter/nf_conntrack_proto_tcp.c	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/net/netfilter/nf_conntrack_proto_tcp.c	2007-12-26 03:28:31.000000000 +0100
+@@ -25,6 +25,10 @@
+ #include <net/netfilter/nf_conntrack_l4proto.h>
+ #include <net/netfilter/nf_conntrack_ecache.h>
+ 
++#if defined(CONFIG_STAR_SHNAT)
++#include <asm/arch/star_shnat_hook.h>
++#endif
++
+ /* Protects conntrack->proto.tcp */
+ static DEFINE_RWLOCK(tcp_lock);
+ 
+@@ -65,11 +69,28 @@
+ 
+ static unsigned int nf_ct_tcp_timeout_syn_sent __read_mostly =      2 MINS;
+ static unsigned int nf_ct_tcp_timeout_syn_recv __read_mostly =     60 SECS;
++
++#if defined(CONFIG_STAR_SHNAT)
++// Default Aging Out Count is 7*4(Unit) = 28, but netfilter must ageout then Smart HNAT
++// So, Set the value to 26
++static unsigned int nf_ct_tcp_timeout_established __read_mostly =  26 MINS;
++EXPORT_SYMBOL(nf_ct_tcp_timeout_established);
++#else
+ static unsigned int nf_ct_tcp_timeout_established __read_mostly =   5 DAYS;
++#endif
+ static unsigned int nf_ct_tcp_timeout_fin_wait __read_mostly =      2 MINS;
+ static unsigned int nf_ct_tcp_timeout_close_wait __read_mostly =   60 SECS;
+ static unsigned int nf_ct_tcp_timeout_last_ack __read_mostly =     30 SECS;
++
++#if defined(CONFIG_STAR_SHNAT) 
++// Because ACK Packet will pass by HNAT, we reduce the timeout wait time .
++// Change this for XBOX Certification
++static unsigned int nf_ct_tcp_timeout_time_wait __read_mostly =     2 SECS;
++// in normal state, we suggest 5 SECS
++// unsigned long ip_ct_tcp_timeout_time_wait =     5 SECS;
++#else
+ static unsigned int nf_ct_tcp_timeout_time_wait __read_mostly =     2 MINS;
++#endif
+ static unsigned int nf_ct_tcp_timeout_close __read_mostly =        10 SECS;
+ 
+ /* RFC1122 says the R2 limit should be at least 100 seconds.
+@@ -919,6 +940,9 @@
+ 		break;
+ 	}
+ 
++#if defined(CONFIG_STAR_SHNAT)
++	if (0)	//	if(!(th->rst == 1 || th->fin == 1))
++#endif
+ 	if (!tcp_in_window(conntrack, &conntrack->proto.tcp, dir, index,
+ 			   skb, dataoff, th, pf)) {
+ 		write_unlock_bh(&tcp_lock);
+@@ -970,6 +994,11 @@
+ 		   connection. */
+ 		set_bit(IPS_ASSURED_BIT, &conntrack->status);
+ 		nf_conntrack_event_cache(IPCT_STATUS, skb);
++#if defined(CONFIG_STAR_SHNAT)
++		if (shnat_hook_ready) {
++			shnat_nf_add_session_hook(conntrack, NULL, 1);
++		}
++#endif
+ 	}
+ 	nf_ct_refresh_acct(conntrack, ctinfo, skb, timeout);
+ 
+diff -ur -x CVS linux-2.6.23.9/net/netfilter/nf_conntrack_proto_udp.c linux-2.6.23.9-grocx/net/netfilter/nf_conntrack_proto_udp.c
+--- linux-2.6.23.9/net/netfilter/nf_conntrack_proto_udp.c	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/net/netfilter/nf_conntrack_proto_udp.c	2007-12-27 08:37:06.000000000 +0100
+@@ -22,6 +22,10 @@
+ #include <net/netfilter/nf_conntrack_l4proto.h>
+ #include <net/netfilter/nf_conntrack_ecache.h>
+ 
++#if defined(CONFIG_STAR_SHNAT)
++#include <asm/arch/star_shnat_hook.h>
++#endif
++
+ static unsigned int nf_ct_udp_timeout __read_mostly = 30*HZ;
+ static unsigned int nf_ct_udp_timeout_stream __read_mostly = 180*HZ;
+ 
+@@ -81,9 +85,31 @@
+ 				   nf_ct_udp_timeout_stream);
+ 		/* Also, more likely to be important, and not a probe */
+ 		if (!test_and_set_bit(IPS_ASSURED_BIT, &conntrack->status))
++#if defined(CONFIG_STAR_SHNAT)
++		{
++#endif
+ 			nf_conntrack_event_cache(IPCT_STATUS, skb);
++#if defined(CONFIG_STAR_SHNAT)
++			if (shnat_hook_ready) {
++				shnat_nf_add_session_hook(conntrack, NULL, 0);
++			}
++		}
++#endif
+ 	} else
++#if defined(CONFIG_NF_CT_ACCT) && defined(CONFIG_STAR_SHNAT) && defined(CONFIG_STAR_SHNAT_UDP_SESSION_BY_PACKET_COUNT)
++	{
++//printk("%s: packet=%d\n",__FUNCTION__,conntrack->counters[CTINFO2DIR(ctinfo)].packets);
++		if (conntrack->counters[CTINFO2DIR(ctinfo)].packets >= (CONFIG_STAR_SHNAT_UDP_PACKET_COUNT_THRESH-1)) {
++			if (shnat_hook_ready) {
++				shnat_nf_add_session_hook(conntrack, NULL, 0);
++			}
++		}
++
++#endif
+ 		nf_ct_refresh_acct(conntrack, ctinfo, skb, nf_ct_udp_timeout);
++#if defined(CONFIG_NF_CT_ACCT) && defined(CONFIG_STAR_SHNAT) && defined(CONFIG_STAR_SHNAT_UDP_SESSION_BY_PACKET_COUNT)
++	}
++#endif
+ 
+ 	return NF_ACCEPT;
+ }

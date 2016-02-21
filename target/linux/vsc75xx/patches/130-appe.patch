@@ -1,0 +1,40 @@
+diff -ur -x CVS linux-2.6.23.9/include/net/netfilter/nf_conntrack.h linux-2.6.23.9-grocx/include/net/netfilter/nf_conntrack.h
+--- linux-2.6.23.9/include/net/netfilter/nf_conntrack.h	2007-11-26 18:51:43.000000000 +0100
++++ linux-2.6.23.9-grocx/include/net/netfilter/nf_conntrack.h	2007-12-26 03:28:31.000000000 +0100
+@@ -153,6 +153,36 @@
+ 	u32 star_session_hash;
+ 	u32	star_session_link_hash;	
+ #endif
++
++	/* APPE state info */
++	struct {
++		u_int16_t	session_apid;
++	  	u_int8_t	pkt_idx;
++		u_int8_t	flags;
++		char		skype_state_bytes[4];
++
++		struct {
++			u_int8_t skype_pkt_count:4, skype_login_status:4;
++		   	u_int8_t rtp_in_status:4, rtp_out_status:4;
++		   	u_int8_t rtp_in_seq_num;
++		   	u_int8_t rtp_out_seq_num;
++
++			u_int8_t winny_dl_size:5,reserved:3;
++			u_int8_t winny_dl_status:5, winmx_status:3;
++			u_int8_t winmx_pkt_count:4, winmx_left_len:4;
++			u_int8_t share_conn_status1:4, share_conn_status2:4;
++
++		   	u_int8_t emule_pkt_count:4, emule_login_status:4;
++		   	u_int8_t bt_pkt_count:4, bt_traffic_status:4;
++		   	u_int8_t vagaa_pkt_count:4, vagaa_traffic_status:4;
++			u_int8_t freeu_traffic_status:4, reserved2:4;
++
++		   	u_int8_t ftp_status:4, irc_status:4;
++		   	u_int8_t nntp_status:4, pop3_status:4;
++			u_int8_t smtp_status:4, ssh_status:4;
++			u_int8_t telnet_status:4, ssl_status:4;
++		} bd; // behavior detection status
++	} appe;
+ };
+ 
+ static inline struct nf_conn *

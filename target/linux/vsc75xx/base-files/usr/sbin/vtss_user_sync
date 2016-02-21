@@ -1,0 +1,69 @@
+#!/bin/sh
+#
+# Copyright (C) 2008 Vitesse Semiconductor Corporation
+#
+. /etc/functions.sh
+
+sync_passwd() {
+    config_get username "$1" username
+    config_get fullname "$1" fullname
+    local gr=`grep "^$username:" /etc/passwd`
+    if [ -n "$gr" ] ; then
+        # entry was found - update fullname and keep everything else
+        echo -n `echo "$gr" | cut -d: -f1,2,3,4` >> $tempfile
+        echo -n ":${fullname}:" >> $tempfile
+        echo "$gr" | cut -d: -f6,7 >> $tempfile
+    else
+        # entry not found - create a new entry using next uid and gid from user "nobody"
+        echo "${username}:*:${next_uid}:${gid}:${fullname}:/home/${username}:/bin/ash" >> $tempfile
+        next_uid=$(( $next_uid + 1 ))
+    fi
+}
+
+sync_smbpasswd() {
+    config_get username "$1" username
+    config_get password "$1" password
+    config_get_bool disk_sharing "$1" disk_sharing 0
+    if [ "$disk_sharing" = "1" ] ; then
+        /usr/bin/smbpasswd $username $password > /dev/null 2>&1
+    fi
+}
+
+TAG=`basename $0`
+
+tempfile="/tmp/vtss-passwd-$RANDOM.$$"
+rm -f $tempfile
+
+# get the maximum uid used but exclude user "nobody"
+next_uid=`grep -v "^nobody" /etc/passwd | cut -d: -f3 | sort -ru | head -n1`
+next_uid=$(( $next_uid + 1 ))
+
+# make sure that we don't start below 500
+if [ "$next_uid" -lt "500" ] ; then
+    next_uid=500
+fi
+
+# get the gid from user "nobody"
+gid=`grep "^nobody" /etc/passwd | cut -d: -f4`
+
+grep "^root" /etc/passwd >> $tempfile
+grep "^nobody" /etc/passwd >> $tempfile
+grep "^admin" /etc/passwd >> $tempfile
+
+# synchronize passwd file
+if [ -f /etc/config/grocx/users ] ; then
+    config_load /etc/config/grocx/users
+    config_foreach sync_passwd user
+fi
+mv $tempfile /etc/passwd
+
+# synchronize smbpasswd file
+rm -f /etc/samba/smbpasswd
+touch /etc/samba/smbpasswd
+if [ -f /etc/config/grocx/users ] ; then
+    if [ -e /usr/bin/smbpasswd ] ; then
+        config_foreach sync_smbpasswd user
+    else
+        logger -t ${TAG} "/usr/bin/smbpasswd not found"
+    fi
+fi
