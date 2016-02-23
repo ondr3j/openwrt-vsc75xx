@@ -16,6 +16,7 @@ PKG_MD5SUM:=d33d2442bd34387260b1c1db3e623af0
 include $(INCLUDE_DIR)/host-build.mk
 
 define Build/Configure
+	cd $(PKG_BUILD_DIR) && autoconf
 	$(call Build/Configure/Default)
 	[ -f $(PKG_BUILD_DIR)/Makefile ]
 endef
